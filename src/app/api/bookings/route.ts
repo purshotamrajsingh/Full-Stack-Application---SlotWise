@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
 import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
+import { notifyBookingCreated } from "@/lib/notifications";
 import type { BookingStatus } from "@/lib/types";
 
 const createSchema = z.object({
@@ -180,6 +181,23 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Provider time off (holidays, sick days) blocks new bookings too.
+      const off = await tx.timeOff.findMany({
+        where: {
+          providerId: body.providerId,
+          startAt: { lt: endAt },
+          endAt: { gt: startAt },
+        },
+        select: { reason: true },
+      });
+      if (off.length > 0) {
+        throw new HttpError(
+          409,
+          "PROVIDER_TIME_OFF",
+          "The provider is away during that time. Please pick another day.",
+        );
+      }
+
       // The critical overlap guard — runs inside the same transaction as the insert.
       const startOfDay = new Date(
         Date.UTC(startAt.getUTCFullYear(), startAt.getUTCMonth(), startAt.getUTCDate()),
@@ -220,6 +238,8 @@ export async function POST(req: NextRequest) {
     // plus the public slot-availability channel for open booking dialogs.
     emitBookingEvent("booking:created", dto, { id: session.id, name: session.name }, created.provider.userId);
     emitSlotsChanged(dto);
+    // Mock email receipts to the customer and the provider (never blocks the response).
+    notifyBookingCreated(dto, created.provider.userId).catch(() => {});
 
     return ok({ booking: dto }, 201);
   });

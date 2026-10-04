@@ -5,11 +5,13 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarCheck,
+  CalendarPlus,
   CalendarX2,
   CheckCircle2,
   Clock,
   Loader2,
   LogIn,
+  Plane,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,8 +29,8 @@ import { StarRating } from "@/components/slotwise/star-rating";
 import { useAuthStore } from "@/store/auth-store";
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
-import { useSlotsWatch } from "@/hooks/use-realtime";
-import { apiFetch } from "@/lib/client-api";
+import { useSlotsWatch, useTimeOffWatch } from "@/hooks/use-realtime";
+import { apiFetch, downloadIcs } from "@/lib/client-api";
 import type { BookingDTO, ServiceDTO, SlotDTO } from "@/lib/types";
 import {
   addDaysKey,
@@ -46,6 +48,8 @@ import { cn } from "@/lib/utils";
 interface SlotsResponse {
   slots: SlotDTO[];
   durationMin: number;
+  /** Time-off windows overlapping the viewed day (public info). */
+  timeOff?: { startAt: string; endAt: string; reason: string }[];
 }
 
 const DAYS_AHEAD = 14;
@@ -69,6 +73,8 @@ export function BookingDialog() {
   const [selectedSlot, setSelectedSlot] = useState<SlotDTO | null>(null);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  /** Freshly created booking (success screen's "Add to calendar"). */
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   // Resolve service (create) or booking (reschedule) when the dialog opens.
   useEffect(() => {
@@ -80,6 +86,7 @@ export function BookingDialog() {
     setProviderId(null);
     setService(null);
     setExisting(null);
+    setCreatedId(null);
 
     if (rescheduleBookingId) {
       apiFetch<{ items: BookingDTO[] }>("/api/bookings")
@@ -154,6 +161,18 @@ export function BookingDialog() {
     },
   );
 
+  // The provider's time off can also change while the picker is open —
+  // (they block a holiday from another tab) — refresh the grid when it does.
+  useTimeOffWatch(open && step === 2 ? providerId : null, (msg) => {
+    if (msg.providerId !== providerId) return;
+    if (!msg.dates.includes(date)) return;
+    reloadSlots();
+    setSelectedSlot(null);
+    toast.info("Availability just changed", {
+      description: "The provider updated their schedule — the grid has been refreshed.",
+    });
+  });
+
   const chosenProvider = service?.providers.find((p) => p.id === providerId);
   const durationMin = rescheduleMode
     ? existing?.durationMin ?? 0
@@ -166,6 +185,10 @@ export function BookingDialog() {
   );
 
   const slots = slotsData?.slots ?? [];
+  /** The time-off window covering most of this day, if any (for the banner). */
+  const dayBlocked = (slotsData?.timeOff ?? []).find(
+    (w) => w.startAt.slice(0, 10) <= date && w.endAt.slice(0, 10) > date,
+  );
   const grouped = useMemo(() => {
     const groups = new Map<string, SlotDTO[]>();
     for (const s of slots) {
@@ -190,7 +213,7 @@ export function BookingDialog() {
         toast.success("Booking rescheduled.");
         setStep(4);
       } else {
-        await apiFetch<{ booking: BookingDTO }>("/api/bookings", {
+        const res = await apiFetch<{ booking: BookingDTO }>("/api/bookings", {
           method: "POST",
           body: {
             serviceId: effectiveServiceId,
@@ -199,6 +222,7 @@ export function BookingDialog() {
             notes: notes.trim() || undefined,
           },
         });
+        setCreatedId(res.booking.id);
         toast.success("Booking confirmed — see you soon!");
         setStep(4);
       }
@@ -369,7 +393,19 @@ export function BookingDialog() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {slotsLive && (
+                {dayBlocked && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm">
+                    <Plane className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <p className="text-amber-800 dark:text-amber-300">
+                      <span className="font-semibold">Away on this day</span>
+                      {dayBlocked.reason && <> — {dayBlocked.reason}</>}
+                      <span className="block text-xs opacity-80">
+                        Pick another day, or check a different provider.
+                      </span>
+                    </p>
+                  </div>
+                )}
+                {slotsLive && !dayBlocked && (
                   <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="relative flex size-2">
                       <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500 opacity-60" />
@@ -480,7 +516,7 @@ export function BookingDialog() {
         {/* Step 4 — success */}
         {step === 4 && selectedSlot && (
           <div className="flex flex-col items-center gap-4 py-4 text-center">
-            <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
+            <div className="flex size-16 animate-in zoom-in-50 duration-500 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
               <CheckCircle2 className="size-9 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
@@ -496,6 +532,20 @@ export function BookingDialog() {
                 </Badge>
               )}
             </div>
+            {!rescheduleMode && createdId && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() =>
+                  downloadIcs(createdId).catch((err) =>
+                    toast.error(err instanceof Error ? err.message : "Download failed."),
+                  )
+                }
+              >
+                <CalendarPlus className="size-4" />
+                Add to calendar (.ics)
+              </Button>
+            )}
             <div className="flex w-full gap-2">
               <Button
                 variant="outline"

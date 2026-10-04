@@ -187,6 +187,9 @@ export function LandingView() {
       {/* Live activity ticker — social proof from the last 24 hours */}
       <LiveTicker />
 
+      {/* Live platform stats — computed from the same public feed as browse */}
+      {data && data.items.length > 0 && <PlatformStatsBand services={data.items} />}
+
       {/* Categories strip */}
       {categories.length > 0 && (
         <section className="border-b bg-muted/30">
@@ -205,6 +208,9 @@ export function LandingView() {
       <section className="mx-auto w-full max-w-7xl px-4 py-14 sm:px-6">
         <motion.div {...fadeUp} className="mb-6 flex items-end justify-between gap-4">
           <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
+              Featured
+            </p>
             <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Top-rated services</h2>
             <p className="mt-1 text-muted-foreground">Ranked by verified customer reviews.</p>
           </div>
@@ -238,6 +244,9 @@ export function LandingView() {
           >
             Three steps. Under a minute.
           </motion.h2>
+          <p className="mx-auto mt-2 max-w-md text-center text-sm text-muted-foreground">
+            No phone tag, no "is 3pm free?" — the diary is the source of truth.
+          </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {[
               {
@@ -499,5 +508,56 @@ function LiveTicker() {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Live aggregate stats band — computed client-side from the public services
+ * feed (no extra endpoint): total bookings placed, providers on the platform,
+ * services listed and the weighted average rating.
+ */
+function PlatformStatsBand({ services }: { services: ServiceDTO[] }) {
+  const providerIds = new Set<string>();
+  let bookingCount = 0;
+  let ratingSum = 0;
+  let ratingWeight = 0;
+  for (const s of services) {
+    bookingCount += s.bookingCount;
+    for (const p of s.providers) providerIds.add(p.id);
+    if (s.reviewCount > 0) {
+      ratingSum += s.rating * s.reviewCount;
+      ratingWeight += s.reviewCount;
+    }
+  }
+  const avgRating = ratingWeight > 0 ? ratingSum / ratingWeight : 0;
+
+  const stats = [
+    { icon: CalendarCheck2, value: bookingCount.toLocaleString("en-GB"), label: "bookings placed" },
+    { icon: Users, value: String(providerIds.size), label: "specialists" },
+    { icon: Sparkles, value: String(services.length), label: "services listed" },
+    { icon: Star, value: avgRating > 0 ? avgRating.toFixed(1) : "—", label: "average rating" },
+  ];
+
+  return (
+    <motion.section
+      {...fadeUp}
+      className="border-b bg-card/60"
+      aria-label="Platform statistics"
+    >
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-px overflow-hidden px-4 py-8 sm:px-6 lg:grid-cols-4">
+        {stats.map((s) => (
+          <div
+            key={s.label}
+            className="flex flex-col items-center gap-1 border-muted/40 px-4 py-2 text-center lg:border-l lg:first:border-l-0"
+          >
+            <s.icon className="mb-1 size-4 text-primary" />
+            <p className="text-3xl font-bold leading-none tabular-nums tracking-tight">
+              {s.value}
+            </p>
+            <p className="text-xs text-muted-foreground">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </motion.section>
   );
 }

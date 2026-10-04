@@ -23,6 +23,7 @@ model User {
   provider Provider?
   bookings Booking[] @relation("CustomerBookings")
   reviews  Review[]
+  notifications Notification[]
 }
 
 model Service {
@@ -52,6 +53,7 @@ model Provider {
   availability Availability[]
   services     ProviderService[]
   bookings     Booking[]
+  timeOff      TimeOff[]
 }
 
 model ProviderService {
@@ -99,10 +101,47 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   review Review?
+  notifications Notification[]
 
   @@index([providerId, startAt])
   @@index([customerId, startAt])
   @@index([status])
+}
+
+// Provider time off: holidays, sick days, training, partial-day blocks.
+// Slots overlapping a window are unbookable (same overlap math as bookings).
+model TimeOff {
+  id         String   @id @default(cuid())
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  startAt DateTime
+  endAt   DateTime
+  reason  String   @default("")
+
+  createdAt DateTime @default(now())
+
+  @@index([providerId, startAt])
+}
+
+// Mock email outbox: one row per recipient per booking-lifecycle event.
+// Mirrors what a production system would send via SMTP/SMS (see README).
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type      String // booking_created | booking_status | booking_cancelled | booking_rescheduled | time_off_conflict
+  title     String
+  body      String
+  bookingId String?
+
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model Review {

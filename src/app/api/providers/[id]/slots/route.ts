@@ -34,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
     const dayEnd = new Date(dayStart.getTime() + 86_400_000);
 
-    const [availability, busy] = await Promise.all([
+    const [availability, busy, timeOff] = await Promise.all([
       db.availability.findMany({ where: { providerId: id } }),
       db.booking.findMany({
         where: {
@@ -45,6 +45,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         },
         select: { startAt: true, endAt: true },
       }),
+      // Time-off windows overlapping the day — public info (a customer
+      // browsing the calendar may see that the provider is away).
+      db.timeOff.findMany({
+        where: { providerId: id, startAt: { lt: dayEnd }, endAt: { gt: dayStart } },
+        orderBy: { startAt: "asc" },
+      }),
     ]);
 
     const slots = generateSlotsForDate(
@@ -52,6 +58,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       busy,
       link.service.durationMin,
       date,
+      new Date(),
+      timeOff,
     );
 
     return ok({
@@ -62,6 +70,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       stepMin: SLOT_STEP_MIN,
       leadMin: LEAD_MIN,
       slots,
+      timeOff: timeOff.map((t) => ({
+        startAt: t.startAt.toISOString(),
+        endAt: t.endAt.toISOString(),
+        reason: t.reason,
+      })),
     });
   });
 }

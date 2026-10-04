@@ -49,6 +49,9 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **Responsive UI** | Mobile-first (tested at 375 / 768 / 1280 px), dark mode, sticky footer, toast feedback, skeleton loaders |
 | **Realtime updates** | **Socket.io hub** (mini-service, port 3003): JWT-authenticated room subscriptions (`user:*`, `role:*`, `provider-slots:*`). Providers watch their diary update **live** (new booking / cancel / reschedule toasts, pulsing “Live” pill); the admin dashboard refreshes KPIs + charts in place with an activity ticker; an open booking dialog **greys out slots the instant someone else takes them** — and bounces the selection if the chosen slot was stolen. Privacy-safe by design: the public slot channel carries only timing data, never customer identity |
 | **Live landing page** | Public activity ticker ("16 bookings in the last 24h") fed by `/api/activity`, auto-rotating and privacy-safe |
+| **Provider time off** | Holidays, sick days and **partial-day blocks** (e.g. 12:00–14:00) under the Availability tab. Slots inside a window stop being bookable **server-side** (`409 PROVIDER_TIME_OFF`), the booking dialog shows an "Away on this day" banner, customers with affected bookings get a schedule-change notification, and open slot grids refresh live over the hub |
+| **Calendar invites** | Every booking exports a standards-compliant **RFC 5545 `.ics`** file (VEVENT + 60-minute reminder VALARM) — "Add to calendar" on the booking success screen and on every upcoming card |
+| **Notification inbox** | Mock email outbox: booking receipts, status changes, cancellations, reschedules and time-off conflicts persist as per-user notifications (the `Notification` model) and **push live** to the header bell — unread badge + toast — with mark-all-read |
 
 ---
 
@@ -185,11 +188,16 @@ Service     id, name, category, description, durationMin, price, isActive, times
 ProviderService  (providerId, serviceId) composite PK — M:N link
 Availability     id, providerId → Provider, weekday (0=Sun…6=Sat), startMin, endMin
                  unique (providerId, weekday, startMin)
+TimeOff     id, providerId → Provider, startAt, endAt, reason — holidays/sick days/partial-day
+             blocks; slots overlapping a window are unbookable (index: providerId, startAt)
 Booking     id, customerId → User, providerId → Provider, serviceId → Service,
             startAt, endAt, status[PENDING|CONFIRMED|COMPLETED|CANCELLED|NO_SHOW],
             notes, timestamps
             index (providerId, startAt) — the double-booking scan path
 Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment
+Notification id, userId → User, type[booking_created|booking_status|booking_cancelled|
+            booking_rescheduled|time_off_conflict], title, body, bookingId → Booking?,
+            readAt? — mock email outbox (index: userId, createdAt)
 ```
 
 Prisma schema: [`prisma/schema.prisma`](prisma/schema.prisma) · Seed: [`prisma/seed.ts`](prisma/seed.ts)
@@ -231,9 +239,12 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | POST | `/providers` | admin | provisions a PROVIDER user (name, email, password, bio, specialty, serviceIds) |
 | GET | `/providers/:id` | public | full profile: services, rating, weekly availability + 10 recent reviews (email admin-only) |
 | PATCH | `/providers/:id` | admin | bio / specialty / isActive / service links |
-| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags |
+| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags + overlapping `timeOff` windows |
 | GET | `/providers/me/availability` | provider/admin | weekly windows |
 | PUT | `/providers/me/availability` | provider/admin | full replace; rejects overlapping windows |
+| GET | `/providers/me/time-off` | provider/admin | upcoming + recent windows, each with a live count of affected bookings |
+| POST | `/providers/me/time-off` | provider/admin | `{ date, endDate?, startTime?, endTime?, reason? }` — full-day or partial block; affected customers get a schedule-change notification; `201` returns the window + `notified` count |
+| DELETE | `/providers/me/time-off/:id` | provider/admin | removes the block (slot grids refresh live) |
 
 ### Bookings
 
@@ -245,6 +256,14 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | DELETE | `/bookings/:id` | owner/provider/admin | cancel (PENDING/CONFIRMED only) |
 | PATCH | `/bookings/:id/status` | provider (own) / admin | enforced transitions: PENDING→CONFIRMED\|CANCELLED, CONFIRMED→COMPLETED\|NO_SHOW\|CANCELLED |
 | POST | `/bookings/:id/review` | customer (own) | COMPLETED only, once; `{ rating 1-5, comment? }` |
+| GET | `/bookings/:id/calendar.ics` | owner/provider/admin | RFC 5545 calendar invite (VCALENDAR/VEVENT + 60-min VALARM); cancelled bookings → 400 |
+
+### Notifications (mock email outbox)
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/notifications` | any | own inbox — `limit` → `{ items, unread }`; rows are created on booking create/cancel/reschedule/status-change/time-off conflicts and pushed live over the realtime hub |
+| POST | `/notifications/read-all` | any | marks the whole inbox read |
 
 ### Dashboard & misc
 
@@ -291,7 +310,8 @@ of a PostgreSQL `EXCLUDE` constraint on a `tstzrange` overlap, which would be th
 production-grade expression on Postgres.
 
 Additional invariants enforced server-side: the slot must fit **entirely inside one weekly
-availability window**, respect a 60-minute lead time, and the provider must actually be linked
+availability window**, must not overlap any **time-off window** (`409 PROVIDER_TIME_OFF`),
+respect a 60-minute lead time, and the provider must actually be linked
 to the service.
 
 ---

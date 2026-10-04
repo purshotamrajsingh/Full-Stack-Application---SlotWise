@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  CalendarPlus,
   CalendarX2,
   CalendarRange,
   CheckCircle2,
@@ -44,7 +45,7 @@ import { useUIStore } from "@/store/ui-store";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime } from "@/hooks/use-realtime";
-import { apiFetch } from "@/lib/client-api";
+import { apiFetch, downloadIcs } from "@/lib/client-api";
 import type { BookingDTO } from "@/lib/types";
 import { fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -530,6 +531,21 @@ function BookingCard({
             {active && (
               <>
                 <NotesEditor booking={booking} onSaved={onNotesSaved} />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  title="Download calendar invite"
+                  onClick={() =>
+                    downloadIcs(booking.id).catch((err) =>
+                      toast.error(
+                        err instanceof Error ? err.message : "Download failed.",
+                      ),
+                    )
+                  }
+                >
+                  <CalendarPlus className="size-3.5" /> Calendar
+                </Button>
                 <Button size="sm" variant="outline" onClick={onReschedule} disabled={busy}>
                   <RotateCcw className="size-3.5" /> Reschedule
                 </Button>

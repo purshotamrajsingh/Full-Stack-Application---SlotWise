@@ -110,8 +110,11 @@ export async function apiFetch<T = unknown>(
   return (payload ?? {}) as T;
 }
 
-/** Downloads an authenticated CSV endpoint as a browser file. */
-export async function downloadCsv(path: string): Promise<void> {
+/** Authenticated binary/text file download (CSV, ICS…) as a browser file. */
+async function downloadFile(
+  path: string,
+  fallbackFilename: string,
+): Promise<void> {
   const doFetch = () =>
     fetch(path, {
       headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
@@ -124,7 +127,7 @@ export async function downloadCsv(path: string): Promise<void> {
   }
 
   if (!res.ok) {
-    let message = `Export failed (${res.status})`;
+    let message = `Download failed (${res.status})`;
     try {
       const body = (await res.json()) as { error?: string };
       if (body.error) message = body.error;
@@ -137,7 +140,7 @@ export async function downloadCsv(path: string): Promise<void> {
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") ?? "";
   const match = /filename="([^"]+)"/.exec(disposition);
-  const filename = match?.[1] ?? "slotwise-export.csv";
+  const filename = match?.[1] ?? fallbackFilename;
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -147,4 +150,17 @@ export async function downloadCsv(path: string): Promise<void> {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Downloads an authenticated CSV endpoint as a browser file. */
+export async function downloadCsv(path: string): Promise<void> {
+  await downloadFile(path, "slotwise-export.csv");
+}
+
+/** Downloads a booking's calendar invite (.ics) to the user's machine. */
+export async function downloadIcs(bookingId: string): Promise<void> {
+  await downloadFile(
+    `/api/bookings/${bookingId}/calendar.ics`,
+    "slotwise-booking.ics",
+  );
 }

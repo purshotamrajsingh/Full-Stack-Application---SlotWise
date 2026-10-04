@@ -42,7 +42,7 @@ export function minutesOfDay(d: Date): number {
  * Generates the bookable slot grid for one provider on one date.
  * Slots are 15-min aligned, must fit fully inside a single availability
  * window, and are marked unavailable when they overlap an active booking
- * (PENDING/CONFIRMED) or fall inside the lead-time window.
+ * (PENDING/CONFIRMED), a time-off window, or fall inside the lead-time window.
  */
 export function generateSlotsForDate(
   availability: AvailabilityLike[],
@@ -50,6 +50,7 @@ export function generateSlotsForDate(
   durationMin: number,
   dateKey: string,
   now = new Date(),
+  blocked: BusyLike[] = [],
 ): SlotDTO[] {
   const dayStart = dateKeyToUtc(dateKey);
   const weekday = dayStart.getUTCDay();
@@ -69,11 +70,14 @@ export function generateSlotsForDate(
       const overlaps = busy.some(
         (b) => b.startAt < endAt && b.endAt > startAt,
       );
+      const off = blocked.some(
+        (b) => b.startAt < endAt && b.endAt > startAt,
+      );
 
       slots.push({
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
-        available: !overlaps && !tooSoon,
+        available: !overlaps && !tooSoon && !off,
       });
     }
   }
@@ -122,7 +126,7 @@ export async function computeNextAvailable(
   const now = new Date();
   const horizon = new Date(now.getTime() + days * 86_400_000);
 
-  const [availability, busy] = await Promise.all([
+  const [availability, busy, timeOff] = await Promise.all([
     db.availability.findMany({ where: { providerId } }),
     db.booking.findMany({
       where: {
@@ -130,6 +134,10 @@ export async function computeNextAvailable(
         status: { in: ["PENDING", "CONFIRMED"] },
         startAt: { gte: new Date(now.getTime() - 86_400_000), lt: horizon },
       },
+      select: { startAt: true, endAt: true },
+    }),
+    db.timeOff.findMany({
+      where: { providerId, startAt: { lt: horizon }, endAt: { gte: now } },
       select: { startAt: true, endAt: true },
     }),
   ]);
@@ -153,6 +161,7 @@ export async function computeNextAvailable(
       durationMin,
       day.toISOString().slice(0, 10),
       now,
+      timeOff,
     );
     const first = slots.find((s) => s.available);
     if (first) return first.startAt;

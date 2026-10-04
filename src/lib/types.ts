@@ -56,6 +56,28 @@ export interface SlotDTO {
   available: boolean;
 }
 
+/** Provider time-off window (holiday, sick day, partial-day block). */
+export interface TimeOffDTO {
+  id: string;
+  startAt: string;
+  endAt: string;
+  reason: string;
+  /** Number of active bookings falling inside the window (provider view). */
+  conflicts: number;
+  createdAt: string;
+}
+
+/** Mock email outbox entry shown in the header bell. */
+export interface NotificationDTO {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  bookingId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
 export interface ReviewDTO {
   id: string;
   rating: number;

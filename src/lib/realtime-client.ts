@@ -7,12 +7,14 @@
 
 import { io, type Socket } from "socket.io-client";
 import { getAccessToken } from "@/lib/tokens";
-import type { RealtimeMessage, SlotsChangedMessage } from "@/lib/realtime";
+import type { RealtimeMessage, SlotsChangedMessage, TimeOffChangedMessage, NotificationMessage } from "@/lib/realtime";
 
-export type { RealtimeMessage, SlotsChangedMessage };
+export type { RealtimeMessage, SlotsChangedMessage, TimeOffChangedMessage, NotificationMessage };
 
 type Handler = (msg: RealtimeMessage) => void;
 type SlotsHandler = (msg: SlotsChangedMessage) => void;
+type TimeOffHandler = (msg: TimeOffChangedMessage) => void;
+type NotificationHandler = (msg: NotificationMessage) => void;
 type ConnectionListener = (connected: boolean) => void;
 
 const BOOKING_EVENTS: RealtimeMessage["type"][] = [
@@ -30,6 +32,8 @@ let watchTarget: string | null = null;
 
 const handlers = new Set<Handler>();
 const slotsHandlers = new Set<SlotsHandler>();
+const timeOffHandlers = new Set<TimeOffHandler>();
+const notificationHandlers = new Set<NotificationHandler>();
 const connectionListeners = new Set<ConnectionListener>();
 
 function authenticate(s: Socket) {
@@ -72,6 +76,12 @@ function getSocket(): Socket {
   }
   socket.on("slots:changed", (msg: SlotsChangedMessage) => {
     slotsHandlers.forEach((h) => h(msg));
+  });
+  socket.on("timeoff:changed", (msg: TimeOffChangedMessage) => {
+    timeOffHandlers.forEach((h) => h(msg));
+  });
+  socket.on("notification:new", (msg: NotificationMessage) => {
+    notificationHandlers.forEach((h) => h(msg));
   });
 
   return socket;
@@ -128,6 +138,60 @@ export function acquireSlotsWatch(
 
   return () => {
     slotsHandlers.delete(onSlotsChanged);
+    if (onConnection) connectionListeners.delete(onConnection);
+    refCount -= 1;
+    if (refCount <= 0) {
+      socket?.disconnect();
+      socket = null;
+      subscribed = false;
+      watchTarget = null;
+    }
+  };
+}
+
+/** Subscribe to the provider time-off channel (open booking dialogs). */
+export function acquireTimeOffWatch(
+  onTimeOffChanged: TimeOffHandler,
+  onConnection?: ConnectionListener,
+) {
+  const s = getSocket();
+  refCount += 1;
+  timeOffHandlers.add(onTimeOffChanged);
+  if (onConnection) {
+    connectionListeners.add(onConnection);
+    onConnection(s.connected);
+  }
+  if (s.connected && !subscribed) authenticate(s);
+
+  return () => {
+    timeOffHandlers.delete(onTimeOffChanged);
+    if (onConnection) connectionListeners.delete(onConnection);
+    refCount -= 1;
+    if (refCount <= 0) {
+      socket?.disconnect();
+      socket = null;
+      subscribed = false;
+      watchTarget = null;
+    }
+  };
+}
+
+/** Subscribe to the signed-in user's personal notification channel. */
+export function acquireNotifications(
+  onNotification: NotificationHandler,
+  onConnection?: ConnectionListener,
+) {
+  const s = getSocket();
+  refCount += 1;
+  notificationHandlers.add(onNotification);
+  if (onConnection) {
+    connectionListeners.add(onConnection);
+    onConnection(s.connected);
+  }
+  if (s.connected && !subscribed) authenticate(s);
+
+  return () => {
+    notificationHandlers.delete(onNotification);
     if (onConnection) connectionListeners.delete(onConnection);
     refCount -= 1;
     if (refCount <= 0) {

@@ -30,7 +30,7 @@ export interface RealtimeMessage {
 interface QueuedEmit {
   rooms: string[];
   event: string;
-  payload: RealtimeMessage | SlotsChangedMessage;
+  payload: RealtimeMessage | SlotsChangedMessage | TimeOffChangedMessage | NotificationMessage;
 }
 
 let socket: Socket | null = null;
@@ -129,6 +129,79 @@ export function emitSlotsChanged(booking: BookingDTO): void {
       s.emit("internal:emit", { key: INTERNAL_KEY, rooms, event: "slots:changed", payload: msg });
     } else {
       queue.push({ rooms, event: "slots:changed", payload: msg });
+      if (queue.length > 100) queue.shift();
+    }
+  } catch {
+    // Best-effort only.
+  }
+}
+
+export interface TimeOffChangedMessage {
+  providerId: string;
+  /** All affected YYYY-MM-DD days (UTC) inside the window. */
+  dates: string[];
+  startAt: string;
+  endAt: string;
+}
+
+/** Notifies open booking dialogs that the provider's time off changed. */
+export function emitTimeOffChanged(
+  providerId: string,
+  startAt: Date,
+  endAt: Date,
+): void {
+  const dates: string[] = [];
+  const from = new Date(
+    Date.UTC(startAt.getUTCFullYear(), startAt.getUTCMonth(), startAt.getUTCDate()),
+  );
+  const to = new Date(
+    Date.UTC(endAt.getUTCFullYear(), endAt.getUTCMonth(), endAt.getUTCDate()),
+  );
+  for (let d = from; d <= to && dates.length < 120; d = new Date(d.getTime() + 86_400_000)) {
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const msg: TimeOffChangedMessage = {
+    providerId,
+    dates,
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+  };
+  const rooms = [`provider-slots:${providerId}`];
+  try {
+    const s = ensureSocket();
+    if (ready) {
+      s.emit("internal:emit", { key: INTERNAL_KEY, rooms, event: "timeoff:changed", payload: msg });
+    } else {
+      queue.push({ rooms, event: "timeoff:changed", payload: msg });
+      if (queue.length > 100) queue.shift();
+    }
+  } catch {
+    // Best-effort only.
+  }
+}
+
+export interface NotificationMessage {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  bookingId: string | null;
+  createdAt: string;
+}
+
+/** Pushes a fresh notification to the recipient's bell + toast. */
+export function emitNotification(
+  userIds: string[],
+  n: NotificationMessage,
+): void {
+  if (userIds.length === 0) return;
+  const rooms = userIds.map((id) => `user:${id}`);
+  try {
+    const s = ensureSocket();
+    if (ready) {
+      s.emit("internal:emit", { key: INTERNAL_KEY, rooms, event: "notification:new", payload: n });
+    } else {
+      queue.push({ rooms, event: "notification:new", payload: n });
       if (queue.length > 100) queue.shift();
     }
   } catch {

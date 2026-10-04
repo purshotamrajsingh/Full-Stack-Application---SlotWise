@@ -5,6 +5,7 @@ import { handle, ok, readJson, HttpError } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
+import { notifyBookingStatus } from "@/lib/notifications";
 
 const statusSchema = z.object({
   status: z.enum(["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]),
@@ -58,6 +59,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const dto = toBookingDTO(updated);
     emitBookingEvent("booking:status", dto, { id: session.id, name: session.name }, updated.provider.userId);
     if (body.status === "CANCELLED") emitSlotsChanged(dto); // freed a slot
+    notifyBookingStatus(dto, body.status).catch(() => {}); // mock email to the customer
     return ok({ booking: dto });
   });
 }

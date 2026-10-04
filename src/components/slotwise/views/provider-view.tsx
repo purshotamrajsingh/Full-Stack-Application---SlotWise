@@ -30,6 +30,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/slotwise/status-badge";
 import { EmptyState } from "@/components/slotwise/empty-state";
+import { TimeOffManager } from "@/components/slotwise/time-off-manager";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime } from "@/hooks/use-realtime";
@@ -197,12 +198,13 @@ export function ProviderView() {
           <AllBookings bookings={bookings} loading={loading} error={error} onChanged={reload} />
         </TabsContent>
 
-        <TabsContent value="availability" className="mt-4">
+        <TabsContent value="availability" className="mt-4 flex flex-col gap-6">
           <AvailabilityEditor
             initial={availData?.items ?? []}
             loaded={!loading && availData !== null}
             onSaved={reloadAvail}
           />
+          <TimeOffManager />
         </TabsContent>
       </Tabs>
     </div>

@@ -29,6 +29,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/slotwise/theme-toggle";
+import { NotificationBell } from "@/components/slotwise/notification-bell";
 import { useAuthStore } from "@/store/auth-store";
 import { useUIStore, type View } from "@/store/ui-store";
 import { initials } from "@/lib/format";
@@ -102,6 +103,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            {user && <NotificationBell />}
             <ThemeToggle />
 
             {user ? (

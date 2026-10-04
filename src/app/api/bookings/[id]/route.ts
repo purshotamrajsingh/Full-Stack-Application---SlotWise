@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
 import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
+import { notifyBookingCancelled, notifyBookingRescheduled } from "@/lib/notifications";
 
 const updateSchema = z
   .object({
@@ -57,6 +58,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     const dto = toBookingDTO(updated);
     emitBookingEvent("booking:cancelled", dto, { id: session.id, name: session.name }, updated.provider.userId);
     emitSlotsChanged(dto); // freed a slot
+    notifyBookingCancelled(dto, updated.provider.userId).catch(() => {}); // mock email to provider
     return ok({ booking: dto });
   });
 }
@@ -182,6 +184,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const dto = toBookingDTO(updated);
     emitBookingEvent("booking:rescheduled", dto, { id: session.id, name: session.name }, updated.provider.userId);
     emitSlotsChanged(dto); // old slot freed, new slot taken
+    notifyBookingRescheduled(dto, updated.provider.userId).catch(() => {}); // mock email to provider
     return ok({ booking: dto });
   });
 }
