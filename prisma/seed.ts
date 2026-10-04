@@ -38,7 +38,10 @@ async function main() {
   console.log("Seeding SlotWise…");
 
   // Wipe (FK order)
+  await db.waitlist.deleteMany();
   await db.review.deleteMany();
+  await db.notification.deleteMany();
+  await db.timeOff.deleteMany();
   await db.booking.deleteMany();
   await db.providerService.deleteMany();
   await db.availability.deleteMany();
@@ -321,12 +324,41 @@ async function main() {
   }
   console.log(`Created ${reviewCount} reviews.`);
 
+  // ── Waitlist demo entries (customers watching taken future slots) ────────
+  const futureTaken = await db.booking.findMany({
+    where: {
+      status: { in: ["PENDING", "CONFIRMED"] },
+      startAt: { gte: new Date() },
+    },
+    orderBy: { startAt: "asc" },
+    take: 40,
+  });
+  let waitlistCount = 0;
+  // Three customers each watch a taken slot they don't hold themselves —
+  // cancel that booking later and watch the "slot opened" alerts fire.
+  for (const b of futureTaken.slice(0, 3)) {
+    const watcher = pick(customers.filter((c) => c.id !== b.customerId));
+    if (!watcher) break;
+    await db.waitlist.create({
+      data: {
+        userId: watcher.id,
+        providerId: b.providerId,
+        serviceId: b.serviceId,
+        startAt: b.startAt,
+        endAt: b.endAt,
+      },
+    });
+    waitlistCount++;
+  }
+  console.log(`Created ${waitlistCount} waitlist entries.`);
+
   const counts = {
     users: await db.user.count(),
     providers: await db.provider.count(),
     services: await db.service.count(),
     bookings: await db.booking.count(),
     reviews: await db.review.count(),
+    waitlist: await db.waitlist.count(),
   };
   console.log("Seed complete:", counts, "(admin:", admin.email + ")");
 }

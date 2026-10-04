@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Mail, Pencil, Plus, Star, UserRoundCheck } from "lucide-react";
+import { Loader2, Mail, Pencil, Plane, Plus, Star, Trash2, UserRoundCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +34,8 @@ import { EmptyState } from "@/components/slotwise/empty-state";
 import { StarRating } from "@/components/slotwise/star-rating";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { apiFetch } from "@/lib/client-api";
-import { initials } from "@/lib/format";
+import { fmtDateShortUTC, fmtDateUTC, fmtTimeUTC, initials } from "@/lib/format";
+import type { AdminTimeOffDTO } from "@/lib/types";
 
 interface ProviderRow {
   id: string;
@@ -227,6 +238,9 @@ export function AdminStaffView() {
         </div>
       )}
 
+      {/* Upcoming closures across the whole team */}
+      <TimeOffOverview onChanged={reload} />
+
       {/* Create dialog */}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-slim sm:max-w-lg">
@@ -409,5 +423,156 @@ function ServicePicker({
         )}
       </div>
     </div>
+  );
+}
+
+/** Renders "Sat, 10 Oct 2026" / "10 Oct – 18 Oct" / "Tue, 6 Oct · 12:00–14:00". */
+function fmtTimeOffWindow(startISO: string, endISO: string): string {
+  const s = new Date(startISO);
+  const e = new Date(endISO);
+  const lastInclusive = new Date(e.getTime() - 1);
+  const sameDay = s.toISOString().slice(0, 10) === lastInclusive.toISOString().slice(0, 10);
+  const fullDay =
+    s.getUTCHours() === 0 && s.getUTCMinutes() === 0 &&
+    e.getUTCHours() === 0 && e.getUTCMinutes() === 0;
+  if (fullDay && sameDay) return fmtDateUTC(startISO);
+  if (fullDay)
+    return `${fmtDateShortUTC(startISO)} – ${fmtDateShortUTC(lastInclusive.toISOString())}`;
+  if (sameDay)
+    return `${fmtDateUTC(startISO)} · ${fmtTimeUTC(startISO)}–${fmtTimeUTC(endISO)}`;
+  return `${fmtDateShortUTC(startISO)} ${fmtTimeUTC(startISO)} – ${fmtDateShortUTC(endISO)} ${fmtTimeUTC(endISO)}`;
+}
+
+/** Admin-wide overview of upcoming time off, with delete (closure lift). */
+function TimeOffOverview({ onChanged }: { onChanged: () => void }) {
+  const { data, loading, reload } = useApiQuery<{ items: AdminTimeOffDTO[] }>(
+    "/api/admin/time-off",
+  );
+  const [deleteTarget, setDeleteTarget] = useState<AdminTimeOffDTO | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const items = data?.items ?? [];
+
+  async function removeWindow() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiFetch(
+        `/api/providers/me/time-off/${deleteTarget.id}?providerId=${deleteTarget.providerId}`,
+        { method: "DELETE" },
+      );
+      toast.success("Closure removed — those slots are bookable again.");
+      setDeleteTarget(null);
+      reload();
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove the closure.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Card className="py-0 transition-shadow duration-200 hover:shadow-md">
+      <CardHeader className="border-b">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plane className="size-4 text-amber-600 dark:text-amber-400" />
+            Upcoming closures & time off
+          </CardTitle>
+          {items.length > 0 && (
+            <Badge variant="secondary" className="font-normal">
+              {items.length} window{items.length === 1 ? "" : "s"}
+            </Badge>
+          )}
+        </div>
+        <CardDescription>
+          Every provider's blocked days in one view — remove a window to reopen
+          those slots instantly.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-4 pt-4">
+        {loading ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-14" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <p className="flex items-center gap-2 py-6 text-center text-sm text-muted-foreground">
+            <Plane className="size-4 shrink-0 opacity-60" />
+            No upcoming time off — the whole team is at work.
+          </p>
+        ) : (
+          <ul className="list-row-hover max-h-96 divide-y overflow-y-auto scrollbar-slim">
+            {items.map((t) => (
+              <li
+                key={t.id}
+                className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  <Plane className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold leading-tight">
+                    {t.providerName}
+                    {t.specialty && (
+                      <span className="font-normal text-muted-foreground"> · {t.specialty}</span>
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {fmtTimeOffWindow(t.startAt, t.endAt)}
+                    {t.reason && <> — {t.reason}</>}
+                  </p>
+                </div>
+                {t.conflicts > 0 ? (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                  >
+                    {t.conflicts} booking{t.conflicts === 1 ? "" : "s"} to move
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="shrink-0 font-normal text-muted-foreground">
+                    No clashes
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0 hover:text-destructive"
+                  onClick={() => setDeleteTarget(t)}
+                  aria-label={`Remove ${t.providerName}'s time off`}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this closure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.providerName}'s blocked window
+              {deleteTarget ? ` (${fmtTimeOffWindow(deleteTarget.startAt, deleteTarget.endAt)})` : ""}{" "}
+              will be deleted and those hours become bookable again. Affected
+              customers keep their bookings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep closure</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={removeWindow} disabled={deleting}>
+              Remove closure
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   );
 }

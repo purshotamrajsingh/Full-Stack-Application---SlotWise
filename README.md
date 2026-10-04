@@ -51,7 +51,10 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **Live landing page** | Public activity ticker ("16 bookings in the last 24h") fed by `/api/activity`, auto-rotating and privacy-safe |
 | **Provider time off** | Holidays, sick days and **partial-day blocks** (e.g. 12:00–14:00) under the Availability tab. Slots inside a window stop being bookable **server-side** (`409 PROVIDER_TIME_OFF`), the booking dialog shows an "Away on this day" banner, customers with affected bookings get a schedule-change notification, and open slot grids refresh live over the hub |
 | **Calendar invites** | Every booking exports a standards-compliant **RFC 5545 `.ics`** file (VEVENT + 60-minute reminder VALARM) — "Add to calendar" on the booking success screen and on every upcoming card |
-| **Notification inbox** | Mock email outbox: booking receipts, status changes, cancellations, reschedules and time-off conflicts persist as per-user notifications (the `Notification` model) and **push live** to the header bell — unread badge + toast — with mark-all-read |
+| **Notification inbox** | Mock email outbox: booking receipts, status changes, cancellations, reschedules, time-off conflicts **and waitlist alerts** persist as per-user notifications and **push live** to the header bell — unread badge + toast — with mark-all-read **and click-a-single-item-to-read** |
+| **Slot waitlist** | Customers **watch a taken slot** (little bell on any greyed-out slot in the booking calendar, or the "Watch it" banner that appears the moment someone steals their chosen slot). When the holding booking is cancelled or rescheduled away, every watcher gets a one-shot **"slot opened"** notification (in-app + bell + live toast), and the entry flips to an "alerted" state in My bookings → Waitlist. Server-enforced: only genuinely taken slots are watchable, no duplicates, max 10 active watches, watchers who already hold a conflicting booking are skipped |
+| **Provider insights** | The provider portal's **Insights tab**: revenue / bookings / rating / **utilisation (booked vs open hours)** / repeat-client share / upcoming KPIs, an **8-week performance chart** (booking bars + cumulative revenue area), top-services revenue mix and outcome donut — the same visual language as the admin dashboard |
+| **Admin closures overview** | The Staff tab lists **every provider's upcoming time off** in one card — window reason, "N bookings to move" clash badges — and admins can lift a closure with one click (slots reopen instantly, open booking grids refresh live) |
 
 ---
 
@@ -170,7 +173,7 @@ All demo accounts share the password **`Password#123`**.
 | Role | Email | What to try |
 | --- | --- | --- |
 | Admin (owner) | `admin@slotwise.test` | Dashboard → charts, CSV export, Services CRUD, Staff, Bookings |
-| Provider | `priya@slotwise.test` | Today's diary, confirm/complete, availability editor |
+| Provider | `priya@slotwise.test` | Today's diary, confirm/complete, availability editor, **Insights tab** |
 | Provider | `marco@slotwise.test` | Salon diary (Thu–Sat) |
 | Customer | `sam@slotwise.test` | Search → 3-click book → reschedule/cancel/review |
 
@@ -196,8 +199,11 @@ Booking     id, customerId → User, providerId → Provider, serviceId → Serv
             index (providerId, startAt) — the double-booking scan path
 Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment
 Notification id, userId → User, type[booking_created|booking_status|booking_cancelled|
-            booking_rescheduled|time_off_conflict], title, body, bookingId → Booking?,
+            booking_rescheduled|time_off_conflict|waitlist_opened], title, body, bookingId → Booking?,
             readAt? — mock email outbox (index: userId, createdAt)
+Waitlist    id, userId → User, providerId → Provider, serviceId → Service, startAt, endAt,
+            notifiedAt? — "alert me when this taken slot frees up" entries
+            unique (userId, providerId, startAt); index (providerId, startAt)
 ```
 
 Prisma schema: [`prisma/schema.prisma`](prisma/schema.prisma) · Seed: [`prisma/seed.ts`](prisma/seed.ts)
@@ -239,12 +245,13 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | POST | `/providers` | admin | provisions a PROVIDER user (name, email, password, bio, specialty, serviceIds) |
 | GET | `/providers/:id` | public | full profile: services, rating, weekly availability + 10 recent reviews (email admin-only) |
 | PATCH | `/providers/:id` | admin | bio / specialty / isActive / service links |
-| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags + overlapping `timeOff` windows |
+| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags + `blockedBy` reason (`booking\|lead\|timeoff`) + overlapping `timeOff` windows |
 | GET | `/providers/me/availability` | provider/admin | weekly windows |
 | PUT | `/providers/me/availability` | provider/admin | full replace; rejects overlapping windows |
+| GET | `/providers/me/analytics` | provider | Insights tab: KPIs (revenue 30d, bookings 30d, rating, **utilisation %**, repeat-client %, upcoming) + 8-week `weekly` series + `serviceMix` + `statusMix` |
 | GET | `/providers/me/time-off` | provider/admin | upcoming + recent windows, each with a live count of affected bookings |
 | POST | `/providers/me/time-off` | provider/admin | `{ date, endDate?, startTime?, endTime?, reason? }` — full-day or partial block; affected customers get a schedule-change notification; `201` returns the window + `notified` count |
-| DELETE | `/providers/me/time-off/:id` | provider/admin | removes the block (slot grids refresh live) |
+| DELETE | `/providers/me/time-off/:id` | provider/admin | removes the block (slot grids refresh live); admins may pass `?providerId=` to lift any staff member's closure |
 
 ### Bookings
 
@@ -262,8 +269,17 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/notifications` | any | own inbox — `limit` → `{ items, unread }`; rows are created on booking create/cancel/reschedule/status-change/time-off conflicts and pushed live over the realtime hub |
+| GET | `/notifications` | any | own inbox — `limit` → `{ items, unread }`; rows are created on booking create/cancel/reschedule/status-change/time-off conflicts **and waitlist alerts**, and pushed live over the realtime hub |
 | POST | `/notifications/read-all` | any | marks the whole inbox read |
+| POST | `/notifications/:id/read` | any (own) | marks a **single** notification read (idempotent) |
+
+### Waitlist ("alert me when a slot frees")
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/waitlist` | any (own) | the signed-in customer's watched slots, `notifiedAt` included for history |
+| POST | `/waitlist` | customer | `{ providerId, serviceId, startAt, endAt }` — the slot must genuinely be held by a booking (`409 NOT_TAKEN`), no duplicates (`409 ALREADY_WATCHING`), no self-overlap (`400 ALREADY_BOOKED`), max 10 active watches. When the holding booking is cancelled or rescheduled away, each eligible watcher gets a one-shot `waitlist_opened` notification and the entry flips to notified |
+| DELETE | `/waitlist/:id` | any (own) | stop watching |
 
 ### Dashboard & misc
 
@@ -271,6 +287,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | --- | --- | --- | --- |
 | GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs (incl. previous-period deltas) + all chart series incl. `revenueTrend` (cumulative this-period vs previous) |
 | GET | `/dashboard/export` | admin | `range` → CSV download |
+| GET | `/admin/time-off` | admin | every provider's upcoming closures with clash counts (Staff tab overview) |
 | GET | `/categories` | public | distinct categories + counts |
 | GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials) |
 | GET | `/activity` | public | `limit` → privacy-safe recent-booking feed + 24h count (landing ticker) |

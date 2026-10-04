@@ -7,6 +7,7 @@ import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
 import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
 import { notifyBookingCancelled, notifyBookingRescheduled } from "@/lib/notifications";
+import { notifyFreedSlot } from "@/lib/waitlist";
 
 const updateSchema = z
   .object({
@@ -59,6 +60,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     emitBookingEvent("booking:cancelled", dto, { id: session.id, name: session.name }, updated.provider.userId);
     emitSlotsChanged(dto); // freed a slot
     notifyBookingCancelled(dto, updated.provider.userId).catch(() => {}); // mock email to provider
+    // Waitlist: anyone watching this window gets a one-shot "slot opened" ping.
+    notifyFreedSlot(booking.providerId, booking.startAt, booking.endAt).catch(() => {});
     return ok({ booking: dto });
   });
 }
@@ -108,6 +111,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (Number.isNaN(startAt.getTime())) {
       throw new HttpError(400, "BAD_DATE", "Invalid start time.");
     }
+
+    // The window the booking is leaving — freed for waitlist watchers.
+    const freed = { start: new Date(0), end: new Date(0) };
 
     const updated = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -168,6 +174,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         );
       }
 
+      freed.start = booking.startAt;
+      freed.end = booking.endAt;
+
       return tx.booking.update({
         where: { id: booking.id },
         data: {
@@ -185,6 +194,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     emitBookingEvent("booking:rescheduled", dto, { id: session.id, name: session.name }, updated.provider.userId);
     emitSlotsChanged(dto); // old slot freed, new slot taken
     notifyBookingRescheduled(dto, updated.provider.userId).catch(() => {}); // mock email to provider
+    // Waitlist: the window the booking moved away from is now free.
+    if (freed.start.getTime() > 0) {
+      notifyFreedSlot(updated.providerId, freed.start, freed.end).catch(() => {});
+    }
     return ok({ booking: dto });
   });
 }

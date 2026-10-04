@@ -228,6 +228,54 @@
       0 8px 24px -8px color-mix(in oklch, var(--foreground) 14%, transparent),
       0 2px 8px -2px color-mix(in oklch, var(--foreground) 8%, transparent);
   }
+
+  /* Gentle vertical float for hero visuals */
+  .animate-float {
+    animation: float 7s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  /* Standardised section eyebrow label */
+  .eyebrow {
+    margin-bottom: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary);
+  }
+
+  /* Subtle row affordance inside divide-y lists */
+  .list-row-hover > li,
+  li.list-row-hover {
+    transition: background-color 0.15s ease;
+  }
+  .list-row-hover > li:hover,
+  li.list-row-hover:hover {
+    background: color-mix(in oklch, var(--muted) 55%, transparent);
+  }
+}
+
+/* Respect users who prefer stillness: kill decorative motion only */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .text-gradient,
+  .shimmer::after {
+    animation: none !important;
+  }
+  .card-lift,
+  .card-lift:hover {
+    transform: none;
+    transition: none;
+  }
 }
 
 /* Crisper, consistently visible keyboard focus */

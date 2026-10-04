@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json({
     name: "SlotWise API",
-    version: "1.0.0",
+    version: "1.2.0",
     auth: "Bearer JWT (Authorization header) — access + refresh token pair",
     endpoints: {
       auth: [
@@ -27,6 +27,9 @@ export async function GET() {
         "PATCH /api/providers/:id (admin)",
         "GET  /api/providers/:id/slots?date=&serviceId=",
         "GET/PUT /api/providers/me/availability",
+        "GET  /api/providers/me/analytics (provider)",
+        "GET/POST /api/providers/me/time-off",
+        "DELETE /api/providers/me/time-off/:id",
       ],
       bookings: [
         "GET  /api/bookings?status=&from=&to=&q=&upcoming=&sort=",
@@ -35,12 +38,29 @@ export async function GET() {
         "DELETE /api/bookings/:id (cancel)",
         "PATCH /api/bookings/:id/status (provider/admin)",
         "POST /api/bookings/:id/review (customer)",
+        "GET  /api/bookings/:id/calendar.ics",
+      ],
+      waitlist: [
+        "GET  /api/waitlist (own watches)",
+        "POST /api/waitlist (customer — watch a taken slot)",
+        "DELETE /api/waitlist/:id (stop watching)",
+      ],
+      notifications: [
+        "GET  /api/notifications?limit= (own inbox)",
+        "POST /api/notifications/read-all",
+        "POST /api/notifications/:id/read (single item)",
       ],
       dashboard: [
         "GET /api/dashboard/summary?range= (admin)",
         "GET /api/dashboard/export?range= (admin, CSV)",
+        "GET /api/admin/time-off (admin — closures overview)",
       ],
-      misc: ["GET /api/categories", "GET /api/health"],
+      misc: [
+        "GET /api/categories",
+        "GET /api/reviews/recent?limit=",
+        "GET /api/activity?limit=",
+        "GET /api/health",
+      ],
     },
   });
 }

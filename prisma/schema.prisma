@@ -24,6 +24,7 @@ model User {
   bookings Booking[] @relation("CustomerBookings")
   reviews  Review[]
   notifications Notification[]
+  waitlist Waitlist[]
 }
 
 model Service {
@@ -39,6 +40,7 @@ model Service {
 
   providers ProviderService[]
   bookings  Booking[]
+  waitlist  Waitlist[]
 }
 
 model Provider {
@@ -54,6 +56,7 @@ model Provider {
   services     ProviderService[]
   bookings     Booking[]
   timeOff      TimeOff[]
+  waitlist     Waitlist[]
 }
 
 model ProviderService {
@@ -156,4 +159,30 @@ model Review {
   comment String?
 
   createdAt DateTime @default(now())
+}
+
+// Customer slot watchlist: "tell me the moment this slot frees up".
+// When the booking holding the slot is cancelled or moved away, every
+// matching entry earns a one-shot notification and flips to notified.
+model Waitlist {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  startAt DateTime
+  endAt   DateTime
+
+  /** Set the moment the "slot opened" notification fired (one-shot). */
+  notifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, providerId, startAt])
+  @@index([providerId, startAt])
 }

@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/slotwise/status-badge";
 import { EmptyState } from "@/components/slotwise/empty-state";
 import { TimeOffManager } from "@/components/slotwise/time-off-manager";
+import { InsightsPanel } from "@/components/slotwise/insights-panel";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime } from "@/hooks/use-realtime";
@@ -165,10 +166,11 @@ export function ProviderView() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="today">Diary ({dayBookings.length})</TabsTrigger>
           <TabsTrigger value="all">All bookings</TabsTrigger>
           <TabsTrigger value="availability">Availability</TabsTrigger>
+          <TabsTrigger value="insights">Insights</TabsTrigger>
         </TabsList>
 
         <TabsContent value="today" className="mt-4">
@@ -205,6 +207,10 @@ export function ProviderView() {
             onSaved={reloadAvail}
           />
           <TimeOffManager />
+        </TabsContent>
+
+        <TabsContent value="insights" className="mt-4">
+          <InsightsPanel />
         </TabsContent>
       </Tabs>
     </div>

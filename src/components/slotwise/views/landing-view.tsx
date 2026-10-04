@@ -5,12 +5,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
   BarChart3,
+  Bell,
   CalendarCheck,
   CalendarCheck2,
   CalendarClock,
   CalendarX2,
   CheckCircle2,
-  Clock,
   MousePointerClick,
   Search,
   ShieldCheck,
@@ -129,7 +129,7 @@ export function LandingView() {
             aria-hidden
           >
             <div className="absolute inset-0 rotate-3 rounded-2xl border bg-card/60" />
-            <Card className="relative gap-0 overflow-hidden py-0 shadow-xl">
+            <Card className="animate-float relative gap-0 overflow-hidden py-0 shadow-xl">
               <div className="flex items-center justify-between border-b bg-primary/5 px-5 py-4">
                 <div>
                   <p className="text-sm font-semibold">Deep Tissue Massage</p>
@@ -152,17 +152,26 @@ export function LandingView() {
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {["09:00", "09:45", "10:30", "11:15", "13:00", "13:45", "14:30", "15:15"].map((t, i) => (
-                    <span
-                      key={t}
-                      className={
-                        i === 6
-                          ? "rounded-md bg-primary px-2 py-1.5 text-center text-sm font-semibold tabular-nums text-primary-foreground"
-                          : i === 2 || i === 5
-                            ? "rounded-md border bg-muted px-2 py-1.5 text-center text-sm tabular-nums text-muted-foreground/50 line-through"
-                            : "rounded-md border px-2 py-1.5 text-center text-sm tabular-nums"
-                      }
-                    >
-                      {t}
+                    <span key={t} className="relative">
+                      <span
+                        className={
+                          i === 6
+                            ? "block rounded-md bg-primary px-2 py-1.5 text-center text-sm font-semibold tabular-nums text-primary-foreground"
+                            : i === 2 || i === 5
+                              ? "block rounded-md border bg-muted px-2 py-1.5 text-center text-sm tabular-nums text-muted-foreground/50 line-through"
+                              : "block rounded-md border px-2 py-1.5 text-center text-sm tabular-nums"
+                        }
+                      >
+                        {t}
+                      </span>
+                      {(i === 2 || i === 5) && (
+                        <span
+                          className="absolute -right-1 -top-1.5 flex size-4 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm"
+                          title="Watchlist — get alerted if it frees"
+                        >
+                          <Bell className="size-2" />
+                        </span>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -170,12 +179,12 @@ export function LandingView() {
                   <CheckCircle2 className="size-4" />
                   Booked — paid at the clinic. No overlap possible.
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <CalendarX2 className="size-3.5" /> Conflicts auto-rejected
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <Clock className="size-3.5" /> 60-min lead time
+                    <Bell className="size-3.5" /> Waitlist alerts on taken slots
                   </span>
                 </div>
               </CardContent>

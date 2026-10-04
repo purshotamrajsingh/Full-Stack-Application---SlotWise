@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  Bell,
+  BellRing,
   CalendarPlus,
   CalendarX2,
   CalendarRange,
@@ -44,13 +46,13 @@ import { ReviewDialog } from "@/components/slotwise/review-dialog";
 import { useUIStore } from "@/store/ui-store";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
-import { useRealtime } from "@/hooks/use-realtime";
+import { useRealtime, useNotifications } from "@/hooks/use-realtime";
 import { apiFetch, downloadIcs } from "@/lib/client-api";
-import type { BookingDTO } from "@/lib/types";
+import type { BookingDTO, WaitlistDTO } from "@/lib/types";
 import { fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-type Tab = "upcoming" | "past" | "cancelled";
+type Tab = "upcoming" | "past" | "cancelled" | "waitlist";
 
 export function MyBookingsView() {
   const openReschedule = useUIStore((s) => s.openReschedule);
@@ -65,6 +67,12 @@ export function MyBookingsView() {
   const { data, loading, error, reload } = useApiQuery<{ items: BookingDTO[] }>(
     "/api/bookings?sort=date_desc",
   );
+  const {
+    data: wlData,
+    loading: wlLoading,
+    reload: wlReload,
+  } = useApiQuery<{ items: WaitlistDTO[] }>("/api/waitlist");
+  const wlItems = wlData?.items ?? [];
 
   // Live updates: when the provider confirms/completes one of this user's
   // bookings (or a reschedule lands), refresh the list and say what changed.
@@ -77,6 +85,12 @@ export function MyBookingsView() {
         description: `${msg.booking.providerName} · ${fmtDateUTC(msg.booking.startAt)} ${fmtTimeUTC(msg.booking.startAt)}`,
       });
     }
+  });
+
+  // A watched slot just freed up — refresh the waitlist tab so the entry
+  // flips to "alerted" while the bell toast is still on screen.
+  useNotifications((msg) => {
+    if (msg.type === "waitlist_opened") wlReload();
   });
 
   // Remove a review (only offered inside the 15-minute edit window).
@@ -125,7 +139,7 @@ export function MyBookingsView() {
     }
   }
 
-  const lists: Record<Tab, BookingDTO[]> = grouped;
+  const lists: Record<Exclude<Tab, "waitlist">, BookingDTO[]> = grouped;
 
   // Customer lifetime stats (all computed client-side from the booking list).
   const stats = useMemo(() => {
@@ -164,6 +178,11 @@ export function MyBookingsView() {
     cancelled: {
       title: "Nothing cancelled",
       description: "Cancelled and missed appointments would show up here.",
+    },
+    waitlist: {
+      title: "Not watching any slots",
+      description:
+        "Tap the little bell on a taken slot in the booking calendar — we'll ping you the moment it frees up.",
     },
   };
 
@@ -213,7 +232,7 @@ export function MyBookingsView() {
       ) : null}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="upcoming" className="gap-1.5">
             Upcoming
             <CountPill n={grouped.upcoming.length} />
@@ -226,11 +245,35 @@ export function MyBookingsView() {
             Cancelled
             <CountPill n={grouped.cancelled.length} />
           </TabsTrigger>
+          <TabsTrigger value="waitlist" className="gap-1.5">
+            Waitlist
+            <CountPill n={wlItems.filter((w) => !w.notifiedAt).length} />
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
       {error ? (
         <EmptyState icon={CalendarX2} title="Could not load bookings" description={error} />
+      ) : tab === "waitlist" ? (
+        wlLoading && wlItems.length === 0 ? (
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
+            ))}
+          </div>
+        ) : wlItems.length === 0 ? (
+          <EmptyState
+            icon={BellRing}
+            title={emptyCopy.waitlist.title}
+            description={emptyCopy.waitlist.description}
+          />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {wlItems.map((w) => (
+              <WaitlistCard key={w.id} entry={w} onChanged={wlReload} />
+            ))}
+          </div>
+        )
       ) : loading ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -332,6 +375,100 @@ function CountPill({ n }: { n: number }) {
     <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold text-secondary-foreground">
       {n}
     </span>
+  );
+}
+
+/** One watched slot: "alert me the moment this frees up". */
+function WaitlistCard({
+  entry,
+  onChanged,
+}: {
+  entry: WaitlistDTO;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const alerted = Boolean(entry.notifiedAt);
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await apiFetch(`/api/waitlist/${entry.id}`, { method: "DELETE" });
+      toast.info("Stopped watching that slot.");
+      onChanged();
+    } catch {
+      toast.error("Could not remove the watch.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      className={cn(
+        "card-lift py-0 hover:border-primary/40",
+        alerted && "border-violet-500/30",
+        busy && "opacity-50",
+      )}
+    >
+      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-start gap-4">
+          <div
+            className={cn(
+              "flex size-12 shrink-0 items-center justify-center rounded-lg",
+              alerted
+                ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                : "bg-secondary text-secondary-foreground",
+            )}
+          >
+            {alerted ? (
+              <Sparkles className="size-5" />
+            ) : (
+              <Bell className="size-5 animate-pulse" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold leading-tight">{entry.serviceName}</p>
+              {alerted ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
+                  <Sparkles className="size-3" /> Slot opened — go book it
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                  <span className="relative flex size-1.5">
+                    <span className="absolute inline-flex size-1.5 animate-ping rounded-full bg-amber-500 opacity-75" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+                  </span>
+                  Watching
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              with {entry.providerName} · {fmtDateUTC(entry.startAt)} at{" "}
+              {fmtTimeUTC(entry.startAt)} · {fmtDuration(entry.durationMin)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground/80">
+              {alerted
+                ? "We pinged you when this slot freed up — it may be gone again, so check the calendar."
+                : "We'll notify you the moment this slot frees up."}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+          <span className="text-base font-bold tabular-nums">{fmtMoney(entry.price)}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={remove}
+            disabled={busy}
+            className="hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" /> Remove
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

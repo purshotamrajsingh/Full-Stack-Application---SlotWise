@@ -29,7 +29,7 @@ import { spawn } from "child_process";
 import { Server, type Socket } from "socket.io";
 import { jwtVerify } from "jose";
 
-const PORT = 3003;
+const PORT = 3003; // r5 bootstrap touch
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET ?? "dev-access-secret-change-me",
 );

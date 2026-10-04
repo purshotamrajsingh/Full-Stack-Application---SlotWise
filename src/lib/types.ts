@@ -54,6 +54,9 @@ export interface SlotDTO {
   startAt: string;
   endAt: string;
   available: boolean;
+  /** Why a slot is unavailable — lets the UI offer waitlist joins on
+   *  booking-held slots only ("past" lead-time slots are not watchable). */
+  blockedBy?: "booking" | "lead" | "timeoff" | null;
 }
 
 /** Provider time-off window (holiday, sick day, partial-day block). */
@@ -75,6 +78,22 @@ export interface NotificationDTO {
   body: string;
   bookingId: string | null;
   readAt: string | null;
+  createdAt: string;
+}
+
+/** A customer's slot watch entry ("tell me when this frees up"). */
+export interface WaitlistDTO {
+  id: string;
+  startAt: string;
+  endAt: string;
+  serviceId: string;
+  serviceName: string;
+  category: string;
+  providerId: string;
+  providerName: string;
+  price: number;
+  durationMin: number;
+  notifiedAt: string | null;
   createdAt: string;
 }
 
@@ -237,4 +256,52 @@ export interface DashboardDTO {
   statusMix: StatusPoint[];
   categoryMix: CategoryPoint[];
   recentBookings: BookingDTO[];
+}
+
+/** One week of the provider's performance series (last 8 weeks). */
+export interface ProviderWeekPoint {
+  label: string;
+  startISO: string;
+  bookings: number;
+  completed: number;
+  noShows: number;
+  revenue: number;
+}
+
+/** Provider's service mix row (top services by completed revenue). */
+export interface ProviderServiceMixPoint {
+  service: string;
+  category: string;
+  bookings: number;
+  revenue: number;
+}
+
+/** Aggregates behind the provider portal's Insights tab. */
+export interface ProviderAnalyticsDTO {
+  kpis: {
+    revenue30: number;
+    bookings30: number;
+    rating: number;
+    reviewCount: number;
+    /** Booked minutes / open minutes over the last 30 days (0–100). */
+    utilizationPct: number;
+    /** Share of distinct customers with 2+ bookings (null when unknown). */
+    repeatCustomerPct: number | null;
+    upcoming: number;
+  };
+  weekly: ProviderWeekPoint[];
+  serviceMix: ProviderServiceMixPoint[];
+  statusMix: StatusPoint[];
+}
+
+/** Admin-wide upcoming time-off window (staff view overview). */
+export interface AdminTimeOffDTO {
+  id: string;
+  providerId: string;
+  providerName: string;
+  specialty: string;
+  startAt: string;
+  endAt: string;
+  reason: string;
+  conflicts: number;
 }

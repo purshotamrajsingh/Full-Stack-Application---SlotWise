@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Clock3,
   Inbox,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,11 @@ const TYPE_META: Record<
     icon: CircleAlert,
     ring: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
     chime: toast.warning,
+  },
+  waitlist_opened: {
+    icon: Sparkles,
+    ring: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+    chime: toast.success,
   },
 };
 
@@ -99,6 +105,16 @@ export function NotificationBell() {
       toast.error("Could not mark notifications as read.");
     } finally {
       setMarking(false);
+    }
+  }
+
+  /** Click a single unread item to mark just that one read. */
+  async function markOneRead(id: string) {
+    try {
+      await apiFetch(`/api/notifications/${id}/read`, { method: "POST" });
+      reload();
+    } catch {
+      /* best-effort — the dot simply stays */
     }
   }
 
@@ -160,7 +176,7 @@ export function NotificationBell() {
               </p>
             </div>
           ) : (
-            <ul className="divide-y">
+            <ul className="list-row-hover divide-y">
               {items.map((n) => {
                 const meta = TYPE_META[n.type] ?? {
                   icon: Bell,
@@ -171,9 +187,23 @@ export function NotificationBell() {
                   <li
                     key={n.id}
                     data-notify-at={n.createdAt}
+                    role={n.readAt ? undefined : "button"}
+                    tabIndex={n.readAt ? undefined : 0}
+                    aria-label={n.readAt ? undefined : "Mark notification as read"}
+                    onClick={n.readAt ? undefined : () => markOneRead(n.id)}
+                    onKeyDown={
+                      n.readAt
+                        ? undefined
+                        : (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              markOneRead(n.id);
+                            }
+                          }
+                    }
                     className={cn(
                       "flex gap-3 px-4 py-3 transition-colors",
-                      !n.readAt && "bg-primary/[0.04]",
+                      !n.readAt && "cursor-pointer bg-primary/[0.04] hover:bg-primary/[0.08]",
                     )}
                   >
                     <span

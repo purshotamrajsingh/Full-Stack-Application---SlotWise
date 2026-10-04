@@ -539,7 +539,7 @@ function ChartCard({
   action?: React.ReactNode;
 }) {
   return (
-    <Card className={cn("py-0 transition-shadow duration-200 hover:shadow-md", className)}>
+    <Card className={cn("min-w-0 py-0 transition-shadow duration-200 hover:shadow-md", className)}>
       <CardHeader className="border-b">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">{title}</CardTitle>
@@ -547,7 +547,7 @@ function ChartCard({
         </div>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="p-4 pt-4">
+      <CardContent className="min-w-0 p-4 pt-4">
         {loading ? <Skeleton className="h-56 w-full" /> : children}
       </CardContent>
     </Card>

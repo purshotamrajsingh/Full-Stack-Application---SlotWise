@@ -12,7 +12,8 @@ export type NotificationType =
   | "booking_status" // → customer (confirmed / completed / no-show)
   | "booking_cancelled" // → provider
   | "booking_rescheduled" // → provider
-  | "time_off_conflict"; // → customer (time off added over their booking)
+  | "time_off_conflict" // → customer (time off added over their booking)
+  | "waitlist_opened"; // → customer (a watched slot just freed up)
 
 interface CreateInput {
   userId: string;
@@ -139,4 +140,20 @@ export async function notifyTimeOffConflicts(
       }),
     ),
   );
+}
+
+/** A watched slot just became available (waitlist one-shot). */
+export async function notifyWaitlistOpened(input: {
+  userId: string;
+  serviceName: string;
+  providerName: string;
+  startAt: Date;
+  endAt: Date;
+}): Promise<void> {
+  await createNotification({
+    userId: input.userId,
+    type: "waitlist_opened",
+    title: `Slot opened — ${input.serviceName}`,
+    body: `The ${fmtTimeUTC(input.startAt.toISOString())} ${input.serviceName} slot with ${input.providerName} on ${fmtDateUTC(input.startAt.toISOString())} just freed up — book it before someone else does.`,
+  });
 }

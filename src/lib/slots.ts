@@ -78,6 +78,15 @@ export function generateSlotsForDate(
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
         available: !overlaps && !tooSoon && !off,
+        // Reason for unavailability — the booking dialog offers waitlist
+        // joins only on slots actually held by a booking.
+        blockedBy: overlaps
+          ? "booking"
+          : off
+            ? "timeoff"
+            : tooSoon
+              ? "lead"
+              : null,
       });
     }
   }

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Bell,
+  BellRing,
   CalendarCheck,
   CalendarPlus,
   CalendarX2,
@@ -30,7 +32,7 @@ import { useAuthStore } from "@/store/auth-store";
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useSlotsWatch, useTimeOffWatch } from "@/hooks/use-realtime";
-import { apiFetch, downloadIcs } from "@/lib/client-api";
+import { apiFetch, ApiClientError, downloadIcs } from "@/lib/client-api";
 import type { BookingDTO, ServiceDTO, SlotDTO } from "@/lib/types";
 import {
   addDaysKey,
@@ -75,6 +77,10 @@ export function BookingDialog() {
   const [submitting, setSubmitting] = useState(false);
   /** Freshly created booking (success screen's "Add to calendar"). */
   const [createdId, setCreatedId] = useState<string | null>(null);
+  /** Waitlist watches made in this dialog session: slot startAt → entry id. */
+  const [watched, setWatched] = useState<Record<string, string>>({});
+  /** The slot the user had selected when someone else grabbed it. */
+  const [stolen, setStolen] = useState<SlotDTO | null>(null);
 
   // Resolve service (create) or booking (reschedule) when the dialog opens.
   useEffect(() => {
@@ -87,6 +93,8 @@ export function BookingDialog() {
     setService(null);
     setExisting(null);
     setCreatedId(null);
+    setWatched({});
+    setStolen(null);
 
     if (rescheduleBookingId) {
       apiFetch<{ items: BookingDTO[] }>("/api/bookings")
@@ -138,10 +146,29 @@ export function BookingDialog() {
   const { data: slotsData, loading: slotsLoading, reload: reloadSlots } =
     useApiQuery<SlotsResponse>(open && step === 2 ? slotsPath : null);
 
+  // The signed-in customer's own active bookings with this provider — used to
+  // hide waitlist bells on slots they already (partially) hold themselves.
+  const myBookingsPath = useMemo(() => {
+    if (!user || !open || step !== 2) return null;
+    const first = todayKey();
+    const last = addDaysKey(first, DAYS_AHEAD + 1);
+    return `/api/bookings?from=${first}&to=${last}&sort=date_asc`;
+  }, [user, open, step]);
+  const { data: myBookingsData } = useApiQuery<{ items: BookingDTO[] }>(myBookingsPath);
+  const ownProviderBusy = useMemo(
+    () =>
+      (myBookingsData?.items ?? []).filter(
+        (b) =>
+          b.providerId === providerId &&
+          (b.status === "PENDING" || b.status === "CONFIRMED"),
+      ),
+    [myBookingsData, providerId],
+  );
+
   // Live slot grid: follow this provider's public availability channel while
   // the picker is open. If someone else takes a slot on the viewed date, the
   // grid refreshes instantly — and if they took the slot this user had
-  // selected, bounce them back to the grid with a warning.
+  // selected, bounce them back to the grid with a warning + waitlist offer.
   const { connected: slotsLive } = useSlotsWatch(
     open && step === 2 ? providerId : null,
     open && step === 2 ? date : null,
@@ -153,9 +180,10 @@ export function BookingDialog() {
         msg.startAt <= selectedSlot.endAt &&
         msg.endAt >= selectedSlot.startAt
       ) {
+        setStolen(selectedSlot);
         setSelectedSlot(null);
         toast.error("Someone just took that slot", {
-          description: "The grid has been updated — pick a new time.",
+          description: "The grid has been updated — pick a new time, or watch it below.",
         });
       }
     },
@@ -200,6 +228,64 @@ export function BookingDialog() {
     }
     return [...groups.entries()];
   }, [slots]);
+
+  /** Join the waitlist for a taken slot (one-shot alert when it frees). */
+  async function joinWaitlist(slot: SlotDTO) {
+    if (!providerId || !effectiveServiceId) return;
+    if (!user) {
+      toast.info("Sign in to watch slots", {
+        description: "Create a free account to get alerts when slots open up.",
+      });
+      return;
+    }
+    try {
+      const res = await apiFetch<{ entry: { id: string } }>("/api/waitlist", {
+        method: "POST",
+        body: {
+          providerId,
+          serviceId: effectiveServiceId,
+          startAt: slot.startAt,
+          endAt: slot.endAt,
+        },
+      });
+      setWatched((w) => ({ ...w, [slot.startAt]: res.entry.id }));
+      setStolen(null);
+      toast.success(`Watching ${fmtTimeUTC(slot.startAt)} — we'll ping you if it frees up`, {
+        description: "Find it under My bookings → Waitlist.",
+      });
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        if (err.code === "ALREADY_WATCHING") {
+          toast.info("You're already watching that slot.");
+          setStolen(null);
+        } else if (err.code === "ALREADY_BOOKED") {
+          toast.info("That's your own booking — you already hold this slot.");
+          setStolen(null);
+        } else {
+          toast.error(err.message);
+        }
+      } else {
+        toast.error("Could not join the waitlist.");
+      }
+    }
+  }
+
+  /** Stop watching a slot joined earlier in this dialog session. */
+  async function unwatch(startAt: string) {
+    const id = watched[startAt];
+    if (!id) return;
+    try {
+      await apiFetch(`/api/waitlist/${id}`, { method: "DELETE" });
+      setWatched((prev) => {
+        const next = { ...prev };
+        delete next[startAt];
+        return next;
+      });
+      toast.info(`Stopped watching ${fmtTimeUTC(startAt)}.`);
+    } catch {
+      toast.error("Could not remove the watch.");
+    }
+  }
 
   async function confirm() {
     if (!selectedSlot || !providerId || !effectiveServiceId) return;
@@ -411,8 +497,33 @@ export function BookingDialog() {
                       <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500 opacity-60" />
                       <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
                     </span>
-                    Live availability — greyed slots are already taken
+                    Live availability — greyed slots are taken · {""}
+                    <span className="inline-flex items-center gap-0.5 font-medium text-foreground/70">
+                      <Bell className="size-3" /> tap the bell to get alerts
+                    </span>
                   </p>
+                )}
+                {stolen && user && (
+                  <div
+                    role="status"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm"
+                  >
+                    <p className="text-amber-800 dark:text-amber-300">
+                      <span className="font-semibold">
+                        {fmtTimeUTC(stolen.startAt)} was just taken.
+                      </span>{" "}
+                      We can ping you if it frees up.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0 gap-1.5 border-amber-500/40 bg-card hover:bg-amber-500/20 dark:hover:bg-amber-500/20"
+                      onClick={() => joinWaitlist(stolen)}
+                    >
+                      <BellRing className="size-3.5" />
+                      Watch it
+                    </Button>
+                  </div>
                 )}
                 {grouped.map(([label, group]) => (
                   <div key={label}>
@@ -420,24 +531,65 @@ export function BookingDialog() {
                       {label}
                     </p>
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {group.map((s) => (
-                        <button
-                          key={s.startAt}
-                          type="button"
-                          disabled={!s.available}
-                          onClick={() => setSelectedSlot(s)}
-                          className={cn(
-                            "rounded-md border px-2 py-2 text-sm font-medium tabular-nums transition-colors",
-                            !s.available
-                              ? "cursor-not-allowed border-muted bg-muted/40 text-muted-foreground/50 line-through"
-                              : selectedSlot?.startAt === s.startAt
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "hover:border-primary/50 hover:bg-secondary/60",
-                          )}
-                        >
-                          {fmtTimeUTC(s.startAt)}
-                        </button>
-                      ))}
+                      {group.map((s) => {
+                        const watchable =
+                          !s.available &&
+                          s.blockedBy === "booking" &&
+                          !!user &&
+                          !ownProviderBusy.some(
+                            (b) => b.startAt < s.endAt && b.endAt > s.startAt,
+                          );
+                        const isWatched = Boolean(watched[s.startAt]);
+                        return (
+                          <div key={s.startAt} className="relative">
+                            <button
+                              type="button"
+                              disabled={!s.available}
+                              onClick={() => setSelectedSlot(s)}
+                              className={cn(
+                                "w-full rounded-md border px-2 py-2 text-sm font-medium tabular-nums transition-colors",
+                                !s.available
+                                  ? "cursor-not-allowed border-muted bg-muted/40 text-muted-foreground/50 line-through"
+                                  : selectedSlot?.startAt === s.startAt
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "hover:border-primary/50 hover:bg-secondary/60",
+                              )}
+                            >
+                              {fmtTimeUTC(s.startAt)}
+                            </button>
+                            {watchable && (
+                              <button
+                                type="button"
+                                aria-label={
+                                  isWatched
+                                    ? `Stop watching the ${fmtTimeUTC(s.startAt)} slot`
+                                    : `Get notified if the ${fmtTimeUTC(s.startAt)} slot frees up`
+                                }
+                                title={
+                                  isWatched
+                                    ? "Watching — click to stop"
+                                    : "Get notified if this slot frees up"
+                                }
+                                onClick={() =>
+                                  isWatched ? unwatch(s.startAt) : joinWaitlist(s)
+                                }
+                                className={cn(
+                                  "absolute -right-1 -top-1.5 flex size-4.5 items-center justify-center rounded-full border shadow-sm transition-all",
+                                  isWatched
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border bg-card text-muted-foreground hover:scale-110 hover:border-primary/50 hover:text-primary",
+                                )}
+                              >
+                                {isWatched ? (
+                                  <BellRing className="size-2.5" />
+                                ) : (
+                                  <Bell className="size-2.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
