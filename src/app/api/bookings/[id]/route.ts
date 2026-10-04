@@ -5,6 +5,7 @@ import { handle, ok, readJson, HttpError } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
+import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
 
 const updateSchema = z
   .object({
@@ -53,7 +54,10 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       data: { status: "CANCELLED" },
       include: bookingInclude,
     });
-    return ok({ booking: toBookingDTO(updated) });
+    const dto = toBookingDTO(updated);
+    emitBookingEvent("booking:cancelled", dto, { id: session.id, name: session.name }, updated.provider.userId);
+    emitSlotsChanged(dto); // freed a slot
+    return ok({ booking: dto });
   });
 }
 
@@ -93,7 +97,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         data: { notes: body.notes && body.notes.length > 0 ? body.notes : null },
         include: bookingInclude,
       });
-      return ok({ booking: toBookingDTO(updated) });
+      const dto = toBookingDTO(updated);
+      emitBookingEvent("booking:updated", dto, { id: session.id, name: session.name }, updated.provider.userId);
+      return ok({ booking: dto });
     }
 
     const startAt = new Date(body.startAt);
@@ -173,6 +179,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       });
     });
 
-    return ok({ booking: toBookingDTO(updated) });
+    const dto = toBookingDTO(updated);
+    emitBookingEvent("booking:rescheduled", dto, { id: session.id, name: session.name }, updated.provider.userId);
+    emitSlotsChanged(dto); // old slot freed, new slot taken
+    return ok({ booking: dto });
   });
 }

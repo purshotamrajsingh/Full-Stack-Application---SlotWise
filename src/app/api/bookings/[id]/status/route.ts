@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { handle, ok, readJson, HttpError } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
+import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
 
 const statusSchema = z.object({
   status: z.enum(["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]),
@@ -54,6 +55,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data: { status: body.status },
       include: bookingInclude,
     });
-    return ok({ booking: toBookingDTO(updated) });
+    const dto = toBookingDTO(updated);
+    emitBookingEvent("booking:status", dto, { id: session.id, name: session.name }, updated.provider.userId);
+    if (body.status === "CANCELLED") emitSlotsChanged(dto); // freed a slot
+    return ok({ booking: dto });
   });
 }

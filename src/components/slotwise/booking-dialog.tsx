@@ -27,6 +27,7 @@ import { StarRating } from "@/components/slotwise/star-rating";
 import { useAuthStore } from "@/store/auth-store";
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
+import { useSlotsWatch } from "@/hooks/use-realtime";
 import { apiFetch } from "@/lib/client-api";
 import type { BookingDTO, ServiceDTO, SlotDTO } from "@/lib/types";
 import {
@@ -129,6 +130,29 @@ export function BookingDialog() {
   );
   const { data: slotsData, loading: slotsLoading, reload: reloadSlots } =
     useApiQuery<SlotsResponse>(open && step === 2 ? slotsPath : null);
+
+  // Live slot grid: follow this provider's public availability channel while
+  // the picker is open. If someone else takes a slot on the viewed date, the
+  // grid refreshes instantly — and if they took the slot this user had
+  // selected, bounce them back to the grid with a warning.
+  const { connected: slotsLive } = useSlotsWatch(
+    open && step === 2 ? providerId : null,
+    open && step === 2 ? date : null,
+    (msg) => {
+      if (msg.providerId !== providerId || msg.date !== date) return;
+      reloadSlots();
+      if (
+        selectedSlot &&
+        msg.startAt <= selectedSlot.endAt &&
+        msg.endAt >= selectedSlot.startAt
+      ) {
+        setSelectedSlot(null);
+        toast.error("Someone just took that slot", {
+          description: "The grid has been updated — pick a new time.",
+        });
+      }
+    },
+  );
 
   const chosenProvider = service?.providers.find((p) => p.id === providerId);
   const durationMin = rescheduleMode
@@ -345,6 +369,15 @@ export function BookingDialog() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
+                {slotsLive && (
+                  <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="relative flex size-2">
+                      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500 opacity-60" />
+                      <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                    </span>
+                    Live availability — greyed slots are already taken
+                  </p>
+                )}
                 {grouped.map(([label, group]) => (
                   <div key={label}>
                     <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

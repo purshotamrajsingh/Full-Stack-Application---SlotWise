@@ -53,9 +53,10 @@ import { AdminStaffView } from "@/components/slotwise/views/admin-staff-view";
 import { AdminBookingsView } from "@/components/slotwise/views/admin-bookings-view";
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
+import { useRealtime } from "@/hooks/use-realtime";
 import { downloadCsv } from "@/lib/client-api";
 import type { DashboardDTO } from "@/lib/types";
-import { fmtDateShortUTC, fmtMoney, fmtTimeUTC, initials, statusMeta } from "@/lib/format";
+import { fmtDateShortUTC, fmtDateTimeUTC, fmtMoney, fmtTimeUTC, initials, statusMeta } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -128,10 +129,27 @@ function TabsNav({
 function OverviewSection() {
   const [range, setRange] = useState("30");
   const [exporting, setExporting] = useState(false);
+  const [livePing, setLivePing] = useState<string | null>(null);
 
-  const { data, loading, error } = useApiQuery<DashboardDTO>(
+  const { data, loading, error, reload } = useApiQuery<DashboardDTO>(
     `/api/dashboard/summary?range=${range}`,
   );
+
+  // Live dashboard: any booking mutation anywhere in the business refreshes
+  // the KPIs and charts, with a subtle ticker of what just happened.
+  const { connected } = useRealtime((msg) => {
+    reload();
+    const verbs: Record<string, string> = {
+      "booking:created": "booked",
+      "booking:cancelled": "cancelled",
+      "booking:rescheduled": "moved",
+      "booking:status": "updated",
+      "booking:updated": "edited",
+    };
+    setLivePing(
+      `${msg.booking.customerName} ${verbs[msg.type] ?? "changed"} ${msg.booking.serviceName} · ${fmtDateTimeUTC(msg.booking.startAt)}`,
+    );
+  });
 
   async function exportCsv() {
     setExporting(true);
@@ -159,7 +177,7 @@ function OverviewSection() {
     <div className="flex flex-col gap-6">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={range} onValueChange={setRange}>
             <SelectTrigger className="w-36" aria-label="Date range">
               <SelectValue />
@@ -170,6 +188,27 @@ function OverviewSection() {
               <SelectItem value="90">Last 90 days</SelectItem>
             </SelectContent>
           </Select>
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              connected
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-muted bg-muted/50 text-muted-foreground",
+            )}
+            title={connected ? "Connected — dashboard refreshes live" : "Offline — reconnecting…"}
+          >
+            <Activity className={cn("size-3.5", connected && "animate-pulse text-emerald-600 dark:text-emerald-400")} />
+            {connected ? "Live" : "Offline"}
+          </span>
+          {livePing && (
+            <span
+              key={livePing}
+              className="animate-in fade-in slide-in-from-left-2 hidden items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground sm:inline-flex"
+            >
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              {livePing}
+            </span>
+          )}
         </div>
         <Button variant="outline" onClick={exportCsv} disabled={exporting || loading}>
           <Download className="size-4" />
@@ -353,7 +392,7 @@ function OverviewSection() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto scrollbar-slim">
-            <table className="w-full text-sm">
+            <table className="table-zebra w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <th className="px-5 py-3 font-medium">When</th>

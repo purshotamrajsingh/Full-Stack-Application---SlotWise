@@ -1,10 +1,12 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
   BarChart3,
   CalendarCheck,
+  CalendarCheck2,
   CalendarClock,
   CalendarX2,
   CheckCircle2,
@@ -25,6 +27,7 @@ import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import type { ServiceDTO, TestimonialEntry } from "@/lib/types";
 import { fmtMoney, initials } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const fadeUp = {
   initial: { opacity: 0, y: 16 },
@@ -70,7 +73,7 @@ export function LandingView() {
             </Badge>
             <h1 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
               Appointments that{" "}
-              <span className="relative whitespace-nowrap text-primary">
+              <span className="relative whitespace-nowrap text-gradient">
                 run themselves
                 <svg
                   aria-hidden
@@ -180,6 +183,9 @@ export function LandingView() {
           </motion.div>
         </div>
       </section>
+
+      {/* Live activity ticker — social proof from the last 24 hours */}
+      <LiveTicker />
 
       {/* Categories strip */}
       {categories.length > 0 && (
@@ -396,5 +402,102 @@ export function LandingView() {
         </motion.div>
       </section>
     </div>
+  );
+}
+
+/* ─── Live activity ticker ──────────────────────────────────────────────── */
+
+interface ActivityItem {
+  id: string;
+  service: string;
+  category: string;
+  providerName: string;
+  price: number;
+  createdAt: string;
+}
+
+function relativeTime(iso: string): string {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Slim social-proof band under the hero: a pulsing LIVE badge, the number of
+ * bookings made in the last 24 hours, and an auto-rotating one-line feed of
+ * what was just booked (service + provider only — never the customer).
+ */
+function LiveTicker() {
+  const { data } = useApiQuery<{ items: ActivityItem[]; count24h: number }>(
+    "/api/activity?limit=8",
+  );
+  const [index, setIndex] = useState(0);
+  const items = data?.items ?? [];
+
+  useEffect(() => {
+    if (items.length <= 1) return;
+    const id = setInterval(() => setIndex((i) => (i + 1) % items.length), 3500);
+    return () => clearInterval(id);
+  }, [items.length]);
+
+  if (items.length === 0) return null;
+  const current = items[index % items.length]!;
+
+  return (
+    <section
+      className="border-b bg-primary/[0.04] dark:bg-primary/[0.07]"
+      aria-label="Recent booking activity"
+    >
+      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500 opacity-60" />
+            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+          </span>
+          Live
+        </span>
+        <span className="shrink-0 text-sm text-muted-foreground">
+          <strong className="font-semibold text-foreground">{data?.count24h ?? 0}</strong>{" "}
+          bookings in the last 24h
+        </span>
+        <span className="hidden h-4 w-px shrink-0 bg-border sm:block" aria-hidden />
+        <div className="relative min-w-0 flex-1 overflow-hidden text-sm" aria-live="polite">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.p
+              key={current.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.35 }}
+              className="flex min-w-0 items-center gap-2 truncate"
+            >
+              <CalendarCheck2 className="size-4 shrink-0 text-primary" />
+              <span className="truncate">
+                <strong className="font-medium">{current.service}</strong>
+                <span className="text-muted-foreground"> with {current.providerName}</span>
+                <span className="text-muted-foreground/70"> · {relativeTime(current.createdAt)}</span>
+              </span>
+            </motion.p>
+          </AnimatePresence>
+        </div>
+        <div className="hidden shrink-0 items-center gap-1 sm:flex" aria-hidden>
+          {items.slice(0, 5).map((it, i) => (
+            <button
+              key={it.id}
+              type="button"
+              onClick={() => setIndex(items.indexOf(it))}
+              className={cn(
+                "h-1.5 rounded-full transition-all",
+                i === index % items.length ? "w-5 bg-primary" : "w-1.5 bg-border hover:bg-muted-foreground/40",
+              )}
+              aria-label={`Show activity ${i + 1}`}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }

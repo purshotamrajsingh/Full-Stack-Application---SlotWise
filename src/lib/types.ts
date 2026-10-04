@@ -57,6 +57,7 @@ export interface SlotDTO {
 }
 
 export interface ReviewDTO {
+  id: string;
   rating: number;
   comment: string | null;
   createdAt: string;

@@ -10,6 +10,7 @@ import {
   Clock,
   Loader2,
   Plus,
+  Radio,
   Save,
   Star,
   Trash2,
@@ -31,6 +32,7 @@ import { StatusBadge } from "@/components/slotwise/status-badge";
 import { EmptyState } from "@/components/slotwise/empty-state";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
+import { useRealtime } from "@/hooks/use-realtime";
 import { apiFetch } from "@/lib/client-api";
 import type { AvailabilityDTO, BookingDTO } from "@/lib/types";
 import {
@@ -68,6 +70,29 @@ export function ProviderView() {
     "/api/providers/me/availability",
   );
 
+  // Live diary: refresh + notify when anyone mutates one of this provider's
+  // bookings (skips events caused by the provider's own clicks — those
+  // already show an action toast).
+  const { connected } = useRealtime((msg) => {
+    if (msg.booking.providerId !== user?.providerId) return;
+    reload();
+    if (msg.actorId === user?.id) return;
+    const when = `${fmtDateUTC(msg.booking.startAt)} · ${fmtTimeUTC(msg.booking.startAt)}`;
+    if (msg.type === "booking:created") {
+      toast.success(`New booking — ${msg.booking.serviceName}`, {
+        description: `${msg.booking.customerName} · ${when}`,
+      });
+    } else if (msg.type === "booking:cancelled") {
+      toast.error(`${msg.booking.customerName} cancelled ${msg.booking.serviceName}`, {
+        description: when,
+      });
+    } else if (msg.type === "booking:rescheduled") {
+      toast.info(`${msg.booking.customerName} moved ${msg.booking.serviceName}`, {
+        description: `Now ${when}`,
+      });
+    }
+  });
+
   const bookings = data?.items ?? [];
   const today = todayKey();
   const selectedKey = addDaysKey(today, dayOffset);
@@ -86,13 +111,33 @@ export function ProviderView() {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          Hi {firstName(user?.name ?? "")} 👋
-        </h1>
-        <p className="mt-1 text-muted-foreground">
-          {fmtDateUTC(new Date().toISOString())} — your diary at a glance.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            Hi {firstName(user?.name ?? "")} 👋
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            {fmtDateUTC(new Date().toISOString())} — your diary at a glance.
+          </p>
+        </div>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+            connected
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-muted bg-muted/50 text-muted-foreground",
+          )}
+          title={
+            connected
+              ? "Connected — new bookings appear here instantly"
+              : "Offline — reconnecting…"
+          }
+        >
+          <Radio
+            className={cn("size-3.5", connected && "animate-pulse text-emerald-600 dark:text-emerald-400")}
+          />
+          {connected ? "Live" : "Offline"}
+        </span>
       </div>
 
       {/* Stats */}
@@ -290,8 +335,26 @@ function BookingList({
     <div className="flex flex-col gap-3">
       {bookings.map((b) => {
         const busy = busyId === b.id;
+        // Status-tinted left edge — scan the diary at a glance.
+        const edge =
+          b.status === "PENDING"
+            ? "before:bg-amber-400"
+            : b.status === "CONFIRMED"
+              ? "before:bg-emerald-500"
+              : b.status === "COMPLETED"
+                ? "before:bg-primary"
+                : b.status === "NO_SHOW"
+                  ? "before:bg-rose-400"
+                  : "before:bg-muted-foreground/40";
         return (
-          <Card key={b.id} className={cn("py-0 transition-opacity", busy && "opacity-50")}>
+          <Card
+            key={b.id}
+            className={cn(
+              "card-lift relative overflow-hidden py-0 before:absolute before:inset-y-0 before:left-0 before:w-1 before:content-['']",
+              edge,
+              busy && "opacity-50",
+            )}
+          >
             <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
               <div className="flex min-w-0 flex-1 items-center gap-4">
                 <span className="w-20 shrink-0 text-center">

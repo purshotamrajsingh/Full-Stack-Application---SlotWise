@@ -210,7 +210,7 @@ export function AdminBookingsView() {
         <Card className="py-0">
           <CardContent className="p-0">
             <div className="overflow-x-auto scrollbar-slim">
-              <table className="w-full text-sm">
+              <table className="table-zebra w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3 font-medium">When</th>

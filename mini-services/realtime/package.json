@@ -1,0 +1,14 @@
+{
+  "name": "slotwise-realtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Socket.io realtime hub for SlotWise live booking updates",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts"
+  },
+  "dependencies": {
+    "jose": "^6.2.12",
+    "socket.io": "^4.8.3"
+  }
+}

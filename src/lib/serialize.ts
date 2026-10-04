@@ -3,7 +3,8 @@ import type { BookingDTO, Role, ReviewDTO } from "@/lib/types";
 
 export const bookingInclude = {
   service: true,
-  provider: { include: { user: { select: { name: true } } } },
+  // user.id is needed to target realtime rooms (rooms are keyed by user id).
+  provider: { include: { user: { select: { id: true, name: true } } } },
   customer: { select: { id: true, name: true } },
   review: { include: { author: { select: { name: true } } } },
 } satisfies Prisma.BookingInclude;
@@ -16,6 +17,7 @@ export type BookingFull = Prisma.BookingGetPayload<{
 export function toBookingDTO(b: BookingFull): BookingDTO {
   const review: ReviewDTO | null = b.review
     ? {
+        id: b.review.id,
         rating: b.review.rating,
         comment: b.review.comment,
         createdAt: b.review.createdAt.toISOString(),

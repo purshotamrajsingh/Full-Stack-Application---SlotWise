@@ -161,4 +161,78 @@
     );
     background-size: 22px 22px;
   }
+
+  /* Shimmer sweep for loading skeletons (use on Skeleton blocks) */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 7%, transparent),
+      transparent
+    );
+    animation: shimmer-sweep 1.6s infinite;
+  }
+  @keyframes shimmer-sweep {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Animated gradient text for hero emphasis */
+  .text-gradient {
+    background-image: linear-gradient(
+      100deg,
+      var(--primary) 20%,
+      color-mix(in oklch, var(--primary) 55%, oklch(0.78 0.16 80)) 45%,
+      var(--primary) 70%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: gradient-pan 7s ease-in-out infinite;
+  }
+  @keyframes gradient-pan {
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  /* Zebra striping for data tables */
+  .table-zebra tbody tr:nth-child(even) {
+    background: color-mix(in oklch, var(--muted) 45%, transparent);
+  }
+
+  /* Card hover lift */
+  .card-lift {
+    transition:
+      transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.25s,
+      border-color 0.25s;
+  }
+  .card-lift:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      0 8px 24px -8px color-mix(in oklch, var(--foreground) 14%, transparent),
+      0 2px 8px -2px color-mix(in oklch, var(--foreground) 8%, transparent);
+  }
+}
+
+/* Crisper, consistently visible keyboard focus */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }

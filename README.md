@@ -45,8 +45,10 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **CSV export** | Authenticated download of all bookings in a chosen range (RFC-4180 escaping) |
 | **Provider profiles** | Public profile dialog: bio, specialty, weekly schedule grid, bookable services and recent reviews — one click from any provider chip |
 | **Customer insights** | "My bookings" stats: next-visit countdown, upcoming count, completed visits, lifetime spend; landing page testimonials pulled live from verified reviews |
-| **Reviews** | Customers rate completed bookings 1–5; ratings feed search ranking and provider stats |
+| **Reviews** | Customers rate completed bookings 1–5; ratings feed search ranking and provider stats. **Reviews can be edited or deleted within 15 minutes** of posting (server-enforced window) |
 | **Responsive UI** | Mobile-first (tested at 375 / 768 / 1280 px), dark mode, sticky footer, toast feedback, skeleton loaders |
+| **Realtime updates** | **Socket.io hub** (mini-service, port 3003): JWT-authenticated room subscriptions (`user:*`, `role:*`, `provider-slots:*`). Providers watch their diary update **live** (new booking / cancel / reschedule toasts, pulsing “Live” pill); the admin dashboard refreshes KPIs + charts in place with an activity ticker; an open booking dialog **greys out slots the instant someone else takes them** — and bounces the selection if the chosen slot was stolen. Privacy-safe by design: the public slot channel carries only timing data, never customer identity |
+| **Live landing page** | Public activity ticker ("16 bookings in the last 24h") fed by `/api/activity`, auto-rotating and privacy-safe |
 
 ---
 
@@ -67,6 +69,11 @@ flowchart LR
         SlotEngine["Slot engine\n15-min grid · windows · lead time"]
         TxnGuard["Transactional overlap guard"]
         Analytics["Analytics aggregation"]
+        Emitter["Realtime emitter\n(best-effort, queued)"]
+    end
+
+    subgraph Realtime["Realtime hub — mini-service :3003"]
+        Hub["Socket.io hub\nrooms: user:* · role:* · provider-slots:*"]
     end
 
     subgraph Data["Data layer"]
@@ -78,6 +85,8 @@ flowchart LR
     Routes --> Guard --> Zod --> SlotEngine
     SlotEngine --> TxnGuard --> Prisma --> SQLite
     Routes --> Analytics --> Prisma
+    Routes --> Emitter -->|socket.io server-to-server| Hub
+    UI -->|"io('/?XTransformPort=3003') + JWT subscribe"| Hub
 ```
 
 **Mapping to the classic three tiers:**
@@ -130,6 +139,8 @@ bun install        # or: npm install
 #    DATABASE_URL="file:./db/custom.db"
 #    JWT_SECRET="<random hex>"
 #    JWT_REFRESH_SECRET="<random hex>"
+#    REALTIME_URL="http://localhost:3003"       # realtime hub address
+#    REALTIME_INTERNAL_KEY="<shared secret>"    # must match mini-services/realtime/.env
 
 # 3. create the database schema
 bun run db:push    # prisma db push
@@ -137,7 +148,10 @@ bun run db:push    # prisma db push
 # 4. seed demo data (13 users, 11 services, ~520 bookings, ~180 reviews)
 bun run db:seed
 
-# 5. start the dev server
+# 5. start the realtime hub (live diary / live slots / live dashboard)
+cd mini-services/realtime && bun install && bun run dev   # port 3003
+
+# 6. start the dev server
 bun run dev        # http://localhost:3000
 ```
 
@@ -240,6 +254,9 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | GET | `/dashboard/export` | admin | `range` → CSV download |
 | GET | `/categories` | public | distinct categories + counts |
 | GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials) |
+| GET | `/activity` | public | `limit` → privacy-safe recent-booking feed + 24h count (landing ticker) |
+| PUT | `/reviews/:id` | author | edit own review within **15 min** of posting; `{ rating, comment? }` |
+| DELETE | `/reviews/:id` | author | delete own review within 15 min (booking becomes reviewable again) |
 | GET | `/health` | public | liveness probe |
 | GET | `/api` | public | machine-readable endpoint index |
 

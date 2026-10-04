@@ -23,7 +23,7 @@ export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
   return (
     <Card
       className={cn(
-        "group flex h-full flex-col gap-0 py-0 transition-all hover:-translate-y-0.5 hover:shadow-lg",
+        "card-lift group flex h-full flex-col gap-0 py-0 hover:border-primary/40",
         className,
       )}
     >

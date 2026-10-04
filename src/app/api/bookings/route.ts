@@ -5,6 +5,7 @@ import { handle, ok, query, readJson, HttpError } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
+import { emitBookingEvent, emitSlotsChanged } from "@/lib/realtime";
 import type { BookingStatus } from "@/lib/types";
 
 const createSchema = z.object({
@@ -214,6 +215,12 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    return ok({ booking: toBookingDTO(created) }, 201);
+    const dto = toBookingDTO(created);
+    // Best-effort live notification to the provider's diary + admin feed,
+    // plus the public slot-availability channel for open booking dialogs.
+    emitBookingEvent("booking:created", dto, { id: session.id, name: session.name }, created.provider.userId);
+    emitSlotsChanged(dto);
+
+    return ok({ booking: dto }, 201);
   });
 }

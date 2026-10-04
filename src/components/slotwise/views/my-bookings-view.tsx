@@ -11,6 +11,7 @@ import {
   PencilLine,
   RotateCcw,
   Sparkles,
+  Trash2,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -40,7 +41,9 @@ import { StarRating } from "@/components/slotwise/star-rating";
 import { EmptyState } from "@/components/slotwise/empty-state";
 import { ReviewDialog } from "@/components/slotwise/review-dialog";
 import { useUIStore } from "@/store/ui-store";
+import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
+import { useRealtime } from "@/hooks/use-realtime";
 import { apiFetch } from "@/lib/client-api";
 import type { BookingDTO } from "@/lib/types";
 import { fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast } from "@/lib/format";
@@ -50,14 +53,46 @@ type Tab = "upcoming" | "past" | "cancelled";
 
 export function MyBookingsView() {
   const openReschedule = useUIStore((s) => s.openReschedule);
+  const user = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<Tab>("upcoming");
   const [cancelTarget, setCancelTarget] = useState<BookingDTO | null>(null);
   const [reviewTarget, setReviewTarget] = useState<BookingDTO | null>(null);
+  const [reviewEditMode, setReviewEditMode] = useState(false);
+  const [deleteReviewTarget, setDeleteReviewTarget] = useState<BookingDTO | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const { data, loading, error, reload } = useApiQuery<{ items: BookingDTO[] }>(
     "/api/bookings?sort=date_desc",
   );
+
+  // Live updates: when the provider confirms/completes one of this user's
+  // bookings (or a reschedule lands), refresh the list and say what changed.
+  useRealtime((msg) => {
+    if (msg.booking.customerId !== user?.id) return;
+    reload();
+    if (msg.actorId === user?.id) return;
+    if (msg.type === "booking:status") {
+      toast.info(`Booking ${msg.booking.status.toLowerCase()} — ${msg.booking.serviceName}`, {
+        description: `${msg.booking.providerName} · ${fmtDateUTC(msg.booking.startAt)} ${fmtTimeUTC(msg.booking.startAt)}`,
+      });
+    }
+  });
+
+  // Remove a review (only offered inside the 15-minute edit window).
+  async function deleteReview() {
+    if (!deleteReviewTarget?.review) return;
+    setBusyId(deleteReviewTarget.id);
+    try {
+      await apiFetch(`/api/reviews/${deleteReviewTarget.review.id}`, { method: "DELETE" });
+      toast.success("Review removed.");
+      setDeleteReviewTarget(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove review.");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   const items = data?.items ?? [];
 
@@ -216,7 +251,15 @@ export function MyBookingsView() {
               busy={busyId === b.id}
               onReschedule={() => openReschedule(b.id)}
               onCancel={() => setCancelTarget(b)}
-              onReview={() => setReviewTarget(b)}
+              onReview={() => {
+                setReviewEditMode(false);
+                setReviewTarget(b);
+              }}
+              onEditReview={() => {
+                setReviewEditMode(true);
+                setReviewTarget(b);
+              }}
+              onDeleteReview={() => setDeleteReviewTarget(b)}
               onNotesSaved={reload}
             />
           ))}
@@ -225,9 +268,36 @@ export function MyBookingsView() {
 
       <ReviewDialog
         booking={reviewTarget}
+        mode={reviewEditMode ? "edit" : "create"}
         onClose={() => setReviewTarget(null)}
         onReviewed={reload}
       />
+
+      <AlertDialog
+        open={deleteReviewTarget !== null}
+        onOpenChange={(o) => !o && setDeleteReviewTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your rating and comment for {deleteReviewTarget?.serviceName} with{" "}
+              {deleteReviewTarget?.providerName} will be removed. You can leave
+              a new review afterwards.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep review</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={deleteReview}
+              disabled={busyId !== null}
+            >
+              Delete review
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={cancelTarget !== null} onOpenChange={(o) => !o && setCancelTarget(null)}>
         <AlertDialogContent>
@@ -348,12 +418,17 @@ function NotesEditor({
   );
 }
 
+/** Reviews stay editable for this many minutes after posting (mirrors the API). */
+const REVIEW_EDIT_WINDOW_MIN = 15;
+
 function BookingCard({
   booking,
   busy,
   onReschedule,
   onCancel,
   onReview,
+  onEditReview,
+  onDeleteReview,
   onNotesSaved,
 }: {
   booking: BookingDTO;
@@ -361,17 +436,26 @@ function BookingCard({
   onReschedule: () => void;
   onCancel: () => void;
   onReview: () => void;
+  onEditReview: () => void;
+  onDeleteReview: () => void;
   onNotesSaved: () => void;
 }) {
   const active = booking.status === "PENDING" || booking.status === "CONFIRMED";
   const canReview = booking.status === "COMPLETED" && !booking.review;
+  const reviewMinsLeft = booking.review
+    ? Math.max(
+        0,
+        REVIEW_EDIT_WINDOW_MIN -
+          Math.floor((Date.now() - new Date(booking.review.createdAt).getTime()) / 60_000),
+      )
+    : 0;
+  const reviewEditable = Boolean(booking.review) && reviewMinsLeft > 0;
 
   return (
     <Card
       className={cn(
-        "py-0 transition-opacity",
+        "card-lift py-0 hover:border-primary/40",
         busy && "opacity-50",
-        !busy && "transition-all duration-200 hover:shadow-md",
       )}
     >
       <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
@@ -408,6 +492,31 @@ function BookingCard({
                 {booking.review.comment && (
                   <span className="line-clamp-1 text-xs text-muted-foreground">
                     “{booking.review.comment}”
+                  </span>
+                )}
+                {reviewEditable && (
+                  <span className="inline-flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+                      onClick={onEditReview}
+                      disabled={busy}
+                      title="Edit your review"
+                    >
+                      <PencilLine className="size-3" /> Edit
+                      <span className="text-[10px] text-muted-foreground/70">{reviewMinsLeft}m</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={onDeleteReview}
+                      disabled={busy}
+                      title="Delete your review"
+                    >
+                      <Trash2 className="size-3" /> Delete
+                    </Button>
                   </span>
                 )}
               </div>
