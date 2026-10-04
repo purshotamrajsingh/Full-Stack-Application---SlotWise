@@ -92,6 +92,46 @@ export interface AvailabilityDTO extends AvailabilityWindow {
   id: string;
 }
 
+export interface ProviderReviewEntry {
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  authorName: string;
+  serviceName: string;
+}
+
+/** Full public profile shown in the provider dialog (email omitted unless admin). */
+export interface ProviderProfileDTO {
+  id: string;
+  userId: string;
+  name: string;
+  email?: string;
+  bio: string;
+  specialty: string;
+  isActive: boolean;
+  rating: number;
+  reviewCount: number;
+  availability: AvailabilityWindow[];
+  reviews: ProviderReviewEntry[];
+  services: {
+    id: string;
+    name: string;
+    category: string;
+    price: number;
+    durationMin: number;
+  }[];
+}
+
+export interface TestimonialEntry {
+  id: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  authorName: string;
+  serviceName: string;
+  providerName: string;
+}
+
 export interface AuthResponse {
   user: UserDTO;
   accessToken: string;
@@ -107,6 +147,13 @@ export interface DashboardKPIs {
   activeCustomers: number;
   upcomingBookings: number;
   cancelRate: number;
+  /** Previous-period comparison (same length window before the range). */
+  prevRevenue: number;
+  prevTotalBookings: number;
+  prevNoShowRate: number;
+  revenueDeltaPct: number | null;
+  bookingsDeltaPct: number | null;
+  noShowDeltaPct: number | null;
 }
 
 export interface DayPoint {

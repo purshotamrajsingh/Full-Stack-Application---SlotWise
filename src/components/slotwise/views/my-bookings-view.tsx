@@ -5,8 +5,11 @@ import {
   CalendarX2,
   CalendarRange,
   CheckCircle2,
+  Clock,
   MessageSquareHeart,
   RotateCcw,
+  Sparkles,
+  Wallet,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -79,6 +82,32 @@ export function MyBookingsView() {
   }
 
   const lists: Record<Tab, BookingDTO[]> = grouped;
+
+  // Customer lifetime stats (all computed client-side from the booking list).
+  const stats = useMemo(() => {
+    const completed = items.filter((b) => b.status === "COMPLETED");
+    const spend = completed.reduce((s, b) => s + b.price, 0);
+    const next = grouped.upcoming[0] ?? null;
+    let countdown: string | null = null;
+    if (next) {
+      const days = Math.ceil(
+        (new Date(next.startAt).getTime() - Date.now()) / 86_400_000,
+      );
+      countdown =
+        days <= 0
+          ? "today"
+          : days === 1
+            ? "tomorrow"
+            : `in ${days} days`;
+    }
+    return {
+      spend,
+      visits: completed.length,
+      next,
+      countdown,
+    };
+  }, [items, grouped.upcoming]);
+
   const emptyCopy: Record<Tab, { title: string; description: string }> = {
     upcoming: {
       title: "No upcoming bookings",
@@ -102,6 +131,42 @@ export function MyBookingsView() {
           Reschedule, cancel or review — all in one place.
         </p>
       </div>
+
+      {/* Lifetime stats */}
+      {loading ? (
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
+          ))}
+        </div>
+      ) : items.length > 0 ? (
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <CustomerStat
+            icon={Sparkles}
+            label="Next visit"
+            value={stats.next ? stats.countdown ?? "soon" : "—"}
+            sub={stats.next ? `${stats.next.serviceName}` : "Nothing booked"}
+          />
+          <CustomerStat
+            icon={CalendarRange}
+            label="Upcoming"
+            value={String(grouped.upcoming.length)}
+            sub="appointments"
+          />
+          <CustomerStat
+            icon={CheckCircle2}
+            label="Visits"
+            value={String(stats.visits)}
+            sub="completed all-time"
+          />
+          <CustomerStat
+            icon={Wallet}
+            label="Total spend"
+            value={fmtMoney(stats.spend)}
+            sub="completed visits"
+          />
+        </div>
+      ) : null}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-6">
         <TabsList className="grid w-full grid-cols-3">
@@ -268,6 +333,33 @@ function BookingCard({
               </Button>
             )}
           </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomerStat({
+  icon: Icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: typeof Clock;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <Card className="py-0">
+      <CardContent className="flex items-center gap-3 p-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+          <Icon className="size-4.5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="truncate text-lg font-bold leading-tight tabular-nums">{value}</p>
+          {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
         </div>
       </CardContent>
     </Card>

@@ -20,10 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ServiceCard } from "@/components/slotwise/service-card";
+import { StarRating } from "@/components/slotwise/star-rating";
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
-import type { ServiceDTO } from "@/lib/types";
-import { fmtMoney } from "@/lib/format";
+import type { ServiceDTO, TestimonialEntry } from "@/lib/types";
+import { fmtMoney, initials } from "@/lib/format";
 
 const fadeUp = {
   initial: { opacity: 0, y: 16 },
@@ -36,9 +37,13 @@ export function LandingView() {
   const nav = useUIStore((s) => s.nav);
   const openBooking = useUIStore((s) => s.openBooking);
   const { data } = useApiQuery<{ items: ServiceDTO[] }>("/api/services?sort=rating");
+  const { data: reviewsData } = useApiQuery<{ items: TestimonialEntry[] }>(
+    "/api/reviews/recent?limit=6",
+  );
 
   const featured = (data?.items ?? []).slice(0, 6);
   const categories = [...new Set((data?.items ?? []).map((s) => s.category))];
+  const testimonials = (reviewsData?.items ?? []).slice(0, 6);
 
   return (
     <div className="flex flex-col">
@@ -266,6 +271,51 @@ export function LandingView() {
           </div>
         </div>
       </section>
+
+      {/* Testimonials — pulled live from verified booking reviews */}
+      {testimonials.length > 0 && (
+        <section className="mx-auto w-full max-w-7xl px-4 py-14 sm:px-6">
+          <motion.div {...fadeUp} className="mb-6 flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                What customers say
+              </h2>
+              <p className="mt-1 text-muted-foreground">
+                Every quote below is tied to a completed, paid appointment.
+              </p>
+            </div>
+          </motion.div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {testimonials.map((t, i) => (
+              <motion.div
+                key={t.id}
+                {...fadeUp}
+                transition={{ ...fadeUp.transition, delay: i * 0.06 }}
+              >
+                <Card className="h-full">
+                  <CardContent className="flex h-full flex-col gap-3 p-5">
+                    <StarRating value={t.rating} />
+                    <p className="flex-1 text-sm leading-relaxed text-muted-foreground">
+                      “{t.comment}”
+                    </p>
+                    <div className="flex items-center gap-2.5 border-t pt-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                        {initials(t.authorName)}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{t.authorName}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {t.serviceName} · {t.providerName}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Role cards */}
       <section className="mx-auto w-full max-w-7xl px-4 py-14 sm:px-6">

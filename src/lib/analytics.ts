@@ -19,6 +19,13 @@ export interface DashboardResult {
     activeCustomers: number;
     upcomingBookings: number;
     cancelRate: number;
+    /** Previous-period comparison (same length, immediately before the range). */
+    prevRevenue: number;
+    prevTotalBookings: number;
+    prevNoShowRate: number;
+    revenueDeltaPct: number | null;
+    bookingsDeltaPct: number | null;
+    noShowDeltaPct: number | null;
   };
   bookingsPerDay: {
     date: string;
@@ -60,11 +67,20 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
   const today = startOfTodayUtc();
   const from = new Date(today.getTime() - (range - 1) * DAY_MS);
 
-  const [inRange, upcoming, avgRatingAgg, allTimeCustomers, recent, reviews] =
+  const [inRange, prevRange, upcoming, avgRatingAgg, allTimeCustomers, recent, reviews] =
     await Promise.all([
       db.booking.findMany({
         where: { startAt: { gte: from, lt: new Date(today.getTime() + DAY_MS) } },
         include: bookingInclude,
+      }),
+      db.booking.findMany({
+        where: {
+          startAt: {
+            gte: new Date(from.getTime() - range * DAY_MS),
+            lt: from,
+          },
+        },
+        select: { status: true, service: { select: { price: true } } },
       }),
       db.booking.findMany({
         where: { startAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED"] } },
@@ -102,6 +118,17 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
       : 0;
   const cancelRate =
     inRange.length > 0 ? (cancelled / inRange.length) * 100 : 0;
+
+  // Previous-period comparison (same length window immediately before `from`).
+  const prevCompleted = prevRange.filter((b) => b.status === "COMPLETED");
+  const prevRevenue = prevCompleted.reduce((s, b) => s + b.service.price, 0);
+  const prevNoShows = prevRange.filter((b) => b.status === "NO_SHOW").length;
+  const prevNoShowRate =
+    prevCompleted.length + prevNoShows > 0
+      ? (prevNoShows / (prevCompleted.length + prevNoShows)) * 100
+      : 0;
+  const pct = (curr: number, prev: number): number | null =>
+    prev > 0 ? Math.round(((curr - prev) / prev) * 1000) / 10 : null;
 
   // Bookings per day (zero-filled)
   const perDayMap = new Map<string, { bookings: number; revenue: number }>();
@@ -232,6 +259,15 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
       activeCustomers: allTimeCustomers.length,
       upcomingBookings: upcoming.length,
       cancelRate: Math.round(cancelRate * 10) / 10,
+      prevRevenue: Math.round(prevRevenue * 100) / 100,
+      prevTotalBookings: prevRange.length,
+      prevNoShowRate: Math.round(prevNoShowRate * 10) / 10,
+      revenueDeltaPct: pct(Math.round(revenue * 100) / 100, Math.round(prevRevenue * 100) / 100),
+      bookingsDeltaPct: pct(inRange.length, prevRange.length),
+      noShowDeltaPct:
+        prevNoShowRate > 0
+          ? Math.round((noShowRate - prevNoShowRate) * 10) / 10
+          : null,
     },
     bookingsPerDay,
     revenueByService,

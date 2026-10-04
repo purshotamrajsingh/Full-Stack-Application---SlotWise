@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { handle, ok, readJson, HttpError } from "@/lib/api";
-import { requireSession } from "@/lib/auth";
+import { getSession, requireSession } from "@/lib/auth";
 import { enrichProvider } from "@/lib/services";
 
 const updateSchema = z.object({
@@ -14,19 +14,60 @@ const updateSchema = z.object({
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** GET /api/providers/:id — public provider profile with services. */
-export async function GET(_req: NextRequest, ctx: Ctx) {
+/**
+ * GET /api/providers/:id — public provider profile.
+ * Includes weekly availability + the 10 most recent reviews.
+ * Email is only exposed to admins (staff management).
+ */
+export async function GET(req: NextRequest, ctx: Ctx) {
   return handle(async () => {
     const { id } = await ctx.params;
-    const provider = await db.provider.findUnique({
-      where: { id },
-      include: {
-        user: { select: { name: true, email: true } },
-        services: { include: { service: true } },
+    const session = await getSession(req);
+
+    const [provider, availability, reviews] = await Promise.all([
+      db.provider.findUnique({
+        where: { id },
+        include: {
+          user: { select: { name: true, email: true } },
+          services: { include: { service: true } },
+        },
+      }),
+      db.availability.findMany({
+        where: { providerId: id },
+        orderBy: [{ weekday: "asc" }, { startMin: "asc" }],
+      }),
+      db.review.findMany({
+        where: { booking: { providerId: id } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        include: {
+          author: { select: { name: true } },
+          booking: { include: { service: { select: { name: true } } } },
+        },
+      }),
+    ]);
+    if (!provider) throw new HttpError(404, "NOT_FOUND", "Provider not found.");
+
+    const enriched = await enrichProvider(provider);
+
+    return ok({
+      provider: {
+        ...enriched,
+        ...(session?.role === "ADMIN" ? { email: enriched.email } : { email: undefined }),
+        availability: availability.map((a) => ({
+          weekday: a.weekday,
+          startMin: a.startMin,
+          endMin: a.endMin,
+        })),
+        reviews: reviews.map((r) => ({
+          rating: r.rating,
+          comment: r.comment,
+          createdAt: r.createdAt.toISOString(),
+          authorName: r.author.name,
+          serviceName: r.booking.service.name,
+        })),
       },
     });
-    if (!provider) throw new HttpError(404, "NOT_FOUND", "Provider not found.");
-    return ok({ provider: await enrichProvider(provider) });
   });
 }
 

@@ -78,3 +78,23 @@ Work Log:
 Stage Summary:
 - PROJECT STATUS: COMPLETE & VERIFIED. SlotWise v1.0 fully functional end-to-end.
 - Unresolved/next-phase candidates (for cron rounds): (1) per-business timezone support replacing the UTC simplification; (2) email-style booking confirmations/reminders UI mock; (3) customer-facing provider profile pages with per-provider reviews; (4) pagination on admin bookings table; (5) revenue trend comparison (this range vs previous); (6) WebSocket live diary updates for providers; (7) export PDF report for the 500-word submission; (8) unit tests (slot engine, transitions) once test runner configured.
+
+---
+Task ID: cron-r1 (webDevReview round 1)
+Agent: Primary (Z.ai Code) — scheduled review
+Task: QA sweep + new features (previous-period deltas, provider profiles, customer stats, testimonials)
+
+Work Log:
+- QA sweep via agent-browser: landing/browse/auth/admin all stable, zero page errors, dashboard loads (4 charts, tables). No bugs found → feature work.
+- NEW: dashboard previous-period comparison — analytics.ts fetches the equally long window immediately before the range in parallel; kpis now include prevRevenue/prevTotalBookings/prevNoShowRate + revenueDeltaPct/bookingsDeltaPct/noShowDeltaPct. KPI cards render coloured trend pills (+arrow, tooltip "was £19,260") with goodWhenDown logic for no-show rate.
+- NEW: provider public profile dialog — GET /api/providers/:id extended with weekly availability + 10 recent reviews; email stripped for non-admin sessions (verified: public → hidden, admin → shown). New provider-profile-dialog.tsx (avatar, specialty, rating, bio, 7-day schedule grid with today highlighted, services with Book buttons that hand off into the booking dialog, scrollable reviews). Service-card provider chips are now clickable buttons (stopPropagation, hover scale).
+- NEW: GET /api/reviews/recent?limit → public testimonial feed (comments only); landing gained a "What customers say" section with 6 live review cards.
+- NEW: customer stats strip on My Bookings — next-visit countdown (today/tomorrow/in N days), upcoming count, completed visits, lifetime spend; skeletons while loading.
+- Seed extended from -30d to -60d booking history (935 bookings, 313 reviews after re-seed) so the previous-period deltas are meaningful (revenue -10.4%, bookings -4.6%, no-show +2.4pts).
+- README updated: feature table (+provider profiles, customer insights, trend deltas) and API reference (+/reviews/recent, extended /providers/:id).
+- Verification: curl — deltas/profile/reviews-feed endpoints 200 + correct payloads; browser — testimonials render, profile dialog opens from chip (7 schedule cells / 10 reviews / 3 services), Book handoff → booking dialog "Pick a time", stats strip shows "Next visit: in 2 days", KPI pills verified via DOM eval ("-10.4% [vs prev period: was £19,260]" etc.); VLM QA of dashboard screenshot: "trend pills render cleanly, charts and tables intact"; mobile 375px: no horizontal overflow, testimonials section present; lint 0 problems; dev.log all 200.
+
+Stage Summary:
+- Status: STABLE + feature round complete. All round-1 features shipped and verified (candidates 3 and 5 from the backlog, plus styling/detail work).
+- Risks: none open. Seed re-run wiped earlier ad-hoc QA bookings (expected — demo data only).
+- Next-phase recommendations (priority order): (a) pagination on admin bookings table (list capped at 300); (b) revenue trend line chart (current vs previous period overlay); (c) WebSocket live diary updates for providers (mini-service on port 3003); (d) per-business timezone support; (e) PDF export of the 500-word report for submission.

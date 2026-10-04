@@ -173,6 +173,7 @@ function OverviewSection() {
           value={k ? fmtMoney(k.revenue) : undefined}
           sub={k ? `${fmtMoney(k.expectedRevenue)} expected` : undefined}
           tone="good"
+          delta={k ? { pct: k.revenueDeltaPct, prev: fmtMoney(k.prevRevenue), label: "vs prev period" } : undefined}
         />
         <Kpi
           loading={loading}
@@ -180,6 +181,7 @@ function OverviewSection() {
           label="Bookings"
           value={k ? String(k.totalBookings) : undefined}
           sub={k ? `${k.upcomingBookings} upcoming` : undefined}
+          delta={k ? { pct: k.bookingsDeltaPct, prev: String(k.prevTotalBookings), label: "vs prev period" } : undefined}
         />
         <Kpi
           loading={loading}
@@ -188,6 +190,7 @@ function OverviewSection() {
           value={k ? `${k.noShowRate}%` : undefined}
           sub={k ? `${k.cancelRate}% cancelled` : undefined}
           tone={k && k.noShowRate > 15 ? "bad" : "neutral"}
+          delta={k ? { pct: k.noShowDeltaPct, prev: `${k.prevNoShowRate}%`, label: "vs prev period", goodWhenDown: true } : undefined}
         />
         <Kpi
           loading={loading}
@@ -365,6 +368,7 @@ function Kpi({
   value,
   sub,
   tone,
+  delta,
   loading,
 }: {
   icon: typeof Banknote;
@@ -372,8 +376,25 @@ function Kpi({
   value?: string;
   sub?: string;
   tone?: "good" | "bad" | "neutral";
+  /** Previous-period comparison pill. */
+  delta?: {
+    pct: number | null;
+    prev: string;
+    label: string;
+    /** For metrics where a decrease is good (e.g. no-show rate). */
+    goodWhenDown?: boolean;
+  };
   loading?: boolean;
 }) {
+  const deltaTone =
+    delta?.pct == null
+      ? null
+      : delta.pct === 0
+        ? "flat"
+        : (delta.pct > 0) !== (delta.goodWhenDown ?? false)
+          ? "up"
+          : "down";
+
   return (
     <Card className="py-0">
       <CardContent className="p-4">
@@ -400,6 +421,27 @@ function Kpi({
             {tone === "bad" && <ArrowDownRight className="size-3" />}
             {sub}
           </p>
+        )}
+        {delta && !loading && (
+          <div className="mt-2 flex items-center gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                deltaTone === "up" &&
+                  "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
+                deltaTone === "down" &&
+                  "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+                (deltaTone === "flat" || deltaTone === null) &&
+                  "bg-muted text-muted-foreground",
+              )}
+              title={`${delta.label}: was ${delta.prev}`}
+            >
+              {deltaTone === "up" && <ArrowUpRight className="size-3" />}
+              {deltaTone === "down" && <ArrowDownRight className="size-3" />}
+              {delta.pct == null ? "n/a" : `${delta.pct > 0 ? "+" : ""}${delta.pct}%`}
+            </span>
+            <span className="text-[10px] text-muted-foreground">{delta.label}</span>
+          </div>
         )}
       </CardContent>
     </Card>

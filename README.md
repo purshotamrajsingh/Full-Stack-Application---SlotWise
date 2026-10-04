@@ -39,8 +39,10 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **3-click booking** | Provider → slot grid → confirm. Slot grid is 15-min aligned, respects availability windows, lead time (60 min) and existing bookings; booked slots are greyed out |
 | **Reschedule / cancel** | Customers reschedule or cancel their own pending/confirmed bookings with the same overlap guard |
 | **Provider portal** | Today's diary, one-click confirm / complete / no-show / cancel with server-enforced status transitions, weekly availability editor with overlap validation |
-| **Admin dashboard** | KPIs (revenue, expected revenue, no-show rate, avg rating, active customers), bookings-per-day area chart, revenue by service, **peak hours**, status mix donut, top providers, revenue by category — all live |
+| **Admin dashboard** | KPIs (revenue, expected revenue, no-show rate, avg rating, active customers) with **previous-period trend deltas**, bookings-per-day area chart, revenue by service, **peak hours**, status mix donut, top providers, revenue by category — all live |
 | **CSV export** | Authenticated download of all bookings in a chosen range (RFC-4180 escaping) |
+| **Provider profiles** | Public profile dialog: bio, specialty, weekly schedule grid, bookable services and recent reviews — one click from any provider chip |
+| **Customer insights** | "My bookings" stats: next-visit countdown, upcoming count, completed visits, lifetime spend; landing page testimonials pulled live from verified reviews |
 | **Reviews** | Customers rate completed bookings 1–5; ratings feed search ranking and provider stats |
 | **Responsive UI** | Mobile-first (tested at 375 / 768 / 1280 px), dark mode, sticky footer, toast feedback, skeleton loaders |
 
@@ -211,7 +213,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | --- | --- | --- | --- |
 | GET | `/providers` | public | `q`, `all=1` (admin) |
 | POST | `/providers` | admin | provisions a PROVIDER user (name, email, password, bio, specialty, serviceIds) |
-| GET | `/providers/:id` | public | profile + services + rating |
+| GET | `/providers/:id` | public | full profile: services, rating, weekly availability + 10 recent reviews (email admin-only) |
 | PATCH | `/providers/:id` | admin | bio / specialty / isActive / service links |
 | GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags |
 | GET | `/providers/me/availability` | provider/admin | weekly windows |
@@ -232,9 +234,10 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs + all chart series |
+| GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs (incl. previous-period deltas) + all chart series |
 | GET | `/dashboard/export` | admin | `range` → CSV download |
 | GET | `/categories` | public | distinct categories + counts |
+| GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials) |
 | GET | `/health` | public | liveness probe |
 | GET | `/api` | public | machine-readable endpoint index |
 

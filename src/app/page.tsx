@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppShell } from "@/components/slotwise/app-shell";
 import { BookingDialog } from "@/components/slotwise/booking-dialog";
+import { ProviderProfileDialog } from "@/components/slotwise/provider-profile-dialog";
 import { LandingView } from "@/components/slotwise/views/landing-view";
 import { BrowseView } from "@/components/slotwise/views/browse-view";
 import { AuthView } from "@/components/slotwise/views/auth-view";
@@ -80,6 +81,8 @@ export default function Home() {
 
       {/* Global booking/reschedule dialog (hidden while on the auth view) */}
       {view !== "auth" && <BookingDialog />}
+      {/* Public provider profile dialog */}
+      {view !== "auth" && <ProviderProfileDialog />}
     </AppShell>
   );
 }

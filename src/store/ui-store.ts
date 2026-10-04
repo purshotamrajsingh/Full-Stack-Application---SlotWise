@@ -19,6 +19,8 @@ interface UIState {
   bookingServiceId: string | null;
   /** When set, the dialog runs in reschedule mode for this booking. */
   rescheduleBookingId: string | null;
+  /** Provider whose public profile dialog is open (null = closed). */
+  profileProviderId: string | null;
   /** Message to surface on the auth view (e.g. "Sign in to book"). */
   authIntent: string | null;
   nav: (view: View) => void;
@@ -26,6 +28,8 @@ interface UIState {
   openBooking: (serviceId: string) => void;
   closeBooking: () => void;
   openReschedule: (bookingId: string) => void;
+  openProfile: (providerId: string) => void;
+  closeProfile: () => void;
   goAuth: (intent?: string) => void;
 }
 
@@ -34,6 +38,7 @@ export const useUIStore = create<UIState>((set) => ({
   adminTab: "overview",
   bookingServiceId: null,
   rescheduleBookingId: null,
+  profileProviderId: null,
   authIntent: null,
 
   nav: (view) => set({ view, authIntent: null }),
@@ -41,5 +46,7 @@ export const useUIStore = create<UIState>((set) => ({
   openBooking: (serviceId) => set({ bookingServiceId: serviceId }),
   closeBooking: () => set({ bookingServiceId: null, rescheduleBookingId: null }),
   openReschedule: (bookingId) => set({ rescheduleBookingId: bookingId }),
+  openProfile: (providerId) => set({ profileProviderId: providerId }),
+  closeProfile: () => set({ profileProviderId: null }),
   goAuth: (intent) => set({ view: "auth", authIntent: intent ?? null }),
 }));

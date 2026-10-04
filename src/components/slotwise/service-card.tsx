@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StarRating } from "@/components/slotwise/star-rating";
+import { useUIStore } from "@/store/ui-store";
 import { fmtDuration, fmtMoney, fmtDateShortUTC, fmtTimeUTC, initials } from "@/lib/format";
 import type { ServiceDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ interface ServiceCardProps {
 }
 
 export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
+  const openProfile = useUIStore((s) => s.openProfile);
   const next = service.nextAvailableAt;
 
   return (
@@ -53,16 +55,22 @@ export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {service.providers.length > 0 ? (
             service.providers.slice(0, 3).map((p) => (
-              <span
+              <button
                 key={p.id}
-                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-                title={p.specialty || p.name}
+                type="button"
+                className="group/p inline-flex items-center gap-1.5 rounded-full py-0.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={`View ${p.name}'s profile`}
+                aria-label={`View ${p.name}'s profile`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openProfile(p.id);
+                }}
               >
-                <span className="flex size-6 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-secondary-foreground">
+                <span className="flex size-6 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-secondary-foreground transition-transform group-hover/p:scale-110">
                   {initials(p.name)}
                 </span>
                 {p.name.split(" ").slice(-1)[0]}
-              </span>
+              </button>
             ))
           ) : (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">

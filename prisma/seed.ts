@@ -219,7 +219,7 @@ async function main() {
   for (const [email, prov] of Object.entries(providers)) {
     if (prov.services.length === 0) continue;
 
-    for (let offset = -30; offset <= 10; offset++) {
+    for (let offset = -60; offset <= 10; offset++) {
       const day = new Date(todayStart.getTime() + offset * DAY);
       const weekday = day.getUTCDay();
       const windows = prov.availability.filter((a) => a.weekday === weekday);
