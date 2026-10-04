@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
         title: n.title,
         body: n.body,
         bookingId: n.bookingId,
+        meta: n.meta,
         readAt: n.readAt ? n.readAt.toISOString() : null,
         createdAt: n.createdAt.toISOString(),
       })),

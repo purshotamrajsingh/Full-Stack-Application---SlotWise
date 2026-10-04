@@ -25,6 +25,7 @@ model User {
   reviews  Review[]
   notifications Notification[]
   waitlist Waitlist[]
+  favorites Favorite[]
 }
 
 model Service {
@@ -41,6 +42,7 @@ model Service {
   providers ProviderService[]
   bookings  Booking[]
   waitlist  Waitlist[]
+  favorites Favorite[]
 }
 
 model Provider {
@@ -134,12 +136,15 @@ model Notification {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type      String // booking_created | booking_status | booking_cancelled | booking_rescheduled | time_off_conflict
+  type      String // booking_created | booking_status | booking_cancelled | booking_rescheduled | time_off_conflict | waitlist_opened
   title     String
   body      String
   bookingId String?
 
   booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  /** Optional JSON payload powering inline actions (e.g. waitlist deep-link). */
+  meta String?
 
   readAt    DateTime?
   createdAt DateTime @default(now())
@@ -159,6 +164,21 @@ model Review {
   comment String?
 
   createdAt DateTime @default(now())
+}
+
+// Customer favorites: hearted services surface first in Browse via the
+// "Favorites" filter chip.
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, serviceId])
 }
 
 // Customer slot watchlist: "tell me the moment this slot frees up".

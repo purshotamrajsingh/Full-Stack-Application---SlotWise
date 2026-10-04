@@ -41,7 +41,10 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    let enriched = await enrichServices(services);
+    let enriched = await enrichServices(
+      services,
+      session?.role === "CUSTOMER" ? session.id : null,
+    );
 
     // Text search across service name/category/description and provider names.
     if (q) {

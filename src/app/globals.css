@@ -262,19 +262,53 @@
   li.list-row-hover:hover {
     background: color-mix(in oklch, var(--muted) 55%, transparent);
   }
+
+  /* One-shot enter transition for the main SPA views (root containers) */
+  .view-enter {
+    animation: view-enter 220ms ease-out;
+  }
+  @keyframes view-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Tactile press feedback for primary tap targets (kept colour transitions
+     live so hover states stay smooth alongside the scale) */
+  .press {
+    transition:
+      transform 120ms ease,
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease,
+      box-shadow 150ms ease,
+      opacity 150ms ease;
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
 }
 
 /* Respect users who prefer stillness: kill decorative motion only */
 @media (prefers-reduced-motion: reduce) {
   .animate-float,
   .text-gradient,
-  .shimmer::after {
+  .shimmer::after,
+  .view-enter {
     animation: none !important;
   }
   .card-lift,
   .card-lift:hover {
     transform: none;
     transition: none;
+  }
+  .press:active {
+    transform: none;
   }
 }
 

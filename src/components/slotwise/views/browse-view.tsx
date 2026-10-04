@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarX2, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
+import { CalendarX2, Heart, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ServiceCard } from "@/components/slotwise/service-card";
 import { EmptyState } from "@/components/slotwise/empty-state";
 import { useUIStore } from "@/store/ui-store";
+import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery, useDebounced } from "@/hooks/use-api-query";
 import type { ServiceDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,8 @@ interface ProvidersResponse {
 
 export function BrowseView() {
   const openBooking = useUIStore((s) => s.openBooking);
+  const user = useAuthStore((s) => s.user);
+  const isCustomer = user?.role === "CUSTOMER";
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search, 300);
@@ -49,6 +52,10 @@ export function BrowseView() {
   const [price, setPrice] = useState("all");
   const [provider, setProvider] = useState("all");
   const [sort, setSort] = useState("popular");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  // Optimistic heart toggles applied on top of the server's isFavorite
+  // flags (keyed by serviceId) — see favoriteIds below.
+  const [favOverrides, setFavOverrides] = useState<Record<string, boolean>>({});
 
   const [minPrice, maxPrice] = useMemo(() => {
     if (price === "all") return ["", ""];
@@ -76,12 +83,39 @@ export function BrowseView() {
   );
 
   const items = data?.items ?? [];
+
+  // The customer's hearted services: seeded from the fetched isFavorite
+  // flags, then kept live by card toggles without a refetch. Locally
+  // toggled hearts survive even when a filter hides their card.
+  const favoriteIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of items) {
+      const fav = s.id in favOverrides ? favOverrides[s.id]! : (s.isFavorite ?? false);
+      if (fav) ids.add(s.id);
+    }
+    for (const [id, fav] of Object.entries(favOverrides)) {
+      if (fav) ids.add(id);
+      else ids.delete(id);
+    }
+    return ids;
+  }, [items, favOverrides]);
+
+  function handleFavoriteChange(serviceId: string, isFavorite: boolean) {
+    setFavOverrides((prev) => ({ ...prev, [serviceId]: isFavorite }));
+  }
+
+  // The favorites filter is applied after the category/search filters —
+  // while the chip is on, only hearted services make it to the grid.
+  const visibleItems = favoritesOnly
+    ? items.filter((s) => favoriteIds.has(s.id))
+    : items;
   const hasFilters =
     debouncedSearch.trim() !== "" ||
     category !== "all" ||
     price !== "all" ||
     provider !== "all" ||
-    sort !== "popular";
+    sort !== "popular" ||
+    favoritesOnly;
 
   function reset() {
     setSearch("");
@@ -89,10 +123,11 @@ export function BrowseView() {
     setPrice("all");
     setProvider("all");
     setSort("popular");
+    setFavoritesOnly(false);
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+    <div className="view-enter mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Find your slot</h1>
         <p className="mt-1 text-muted-foreground">
@@ -130,6 +165,24 @@ export function BrowseView() {
                   onClick={() => setCategory(c.name)}
                 />
               ))}
+              {isCustomer && favoriteIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFavoritesOnly((v) => !v)}
+                  aria-pressed={favoritesOnly}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    favoritesOnly
+                      ? "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                      : "bg-card text-muted-foreground hover:border-rose-500/40 hover:text-rose-600 dark:hover:text-rose-300",
+                  )}
+                >
+                  <Heart
+                    className={cn("size-3", favoritesOnly && "fill-rose-500 text-rose-500")}
+                  />
+                  Favorites ({favoriteIds.size})
+                </button>
+              )}
             </div>
           </div>
 
@@ -177,7 +230,9 @@ export function BrowseView() {
         <span>
           {loading
             ? "Searching…"
-            : `${data?.total ?? 0} service${data?.total === 1 ? "" : "s"} found`}
+            : favoritesOnly
+              ? `${visibleItems.length} favorite${visibleItems.length === 1 ? "" : "s"}`
+              : `${data?.total ?? 0} service${data?.total === 1 ? "" : "s"} found`}
         </span>
         {hasFilters && (
           <button
@@ -205,18 +260,38 @@ export function BrowseView() {
             <Skeleton key={i} className="h-64 rounded-xl" />
           ))}
         </div>
-      ) : items.length === 0 ? (
-        <EmptyState
-          icon={CalendarX2}
-          title="No services match those filters"
-          description="Try widening the price range, clearing the search, or picking another category."
-          actionLabel="Reset filters"
-          onAction={reset}
-        />
+      ) : visibleItems.length === 0 ? (
+        favoritesOnly ? (
+          <EmptyState
+            icon={Heart}
+            title="No favorites match the current filters"
+            description="Your hearted services don't fit the active search, category or price filter — reset them to see the full shortlist."
+            actionLabel="Reset filters"
+            onAction={reset}
+          />
+        ) : (
+          <EmptyState
+            icon={CalendarX2}
+            title="No services match those filters"
+            description="Try widening the price range, clearing the search, or picking another category."
+            actionLabel="Reset filters"
+            onAction={reset}
+          />
+        )
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((s) => (
-            <ServiceCard key={s.id} service={s} onBook={openBooking} className="h-full" />
+          {visibleItems.map((s) => (
+            <ServiceCard
+              key={s.id}
+              // Patch the heart flag with the latest toggle so remounts
+              // (e.g. re-entering the filtered grid) seed correctly.
+              service={
+                s.id in favOverrides ? { ...s, isFavorite: favOverrides[s.id]! } : s
+              }
+              onBook={openBooking}
+              onFavoriteChange={handleFavoriteChange}
+              className="h-full"
+            />
           ))}
         </div>
       )}

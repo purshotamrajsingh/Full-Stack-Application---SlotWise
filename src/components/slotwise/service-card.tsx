@@ -1,11 +1,15 @@
 "use client";
 
-import { CalendarClock, Clock, Users } from "lucide-react";
+import { useRef, useState } from "react";
+import { CalendarClock, Clock, Heart, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StarRating } from "@/components/slotwise/star-rating";
 import { useUIStore } from "@/store/ui-store";
+import { useAuthStore } from "@/store/auth-store";
+import { apiFetch } from "@/lib/client-api";
 import { fmtDuration, fmtMoney, fmtDateShortUTC, fmtTimeUTC, initials } from "@/lib/format";
 import type { ServiceDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -13,12 +17,49 @@ import { cn } from "@/lib/utils";
 interface ServiceCardProps {
   service: ServiceDTO;
   onBook: (serviceId: string) => void;
+  /** Customer heart toggle — lets the parent keep its favorites filter in sync. */
+  onFavoriteChange?: (serviceId: string, isFavorite: boolean) => void;
   className?: string;
 }
 
-export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
+export function ServiceCard({ service, onBook, onFavoriteChange, className }: ServiceCardProps) {
   const openProfile = useUIStore((s) => s.openProfile);
+  const user = useAuthStore((s) => s.user);
+  const canFavorite = user?.role === "CUSTOMER";
   const next = service.nextAvailableAt;
+
+  const [isFav, setIsFav] = useState(service.isFavorite ?? false);
+  const pendingRef = useRef(false);
+
+  async function toggleFavorite() {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    const nextFav = !isFav;
+
+    // Optimistic flip + tell the parent (filter chip / count) immediately.
+    setIsFav(nextFav);
+    onFavoriteChange?.(service.id, nextFav);
+
+    try {
+      if (nextFav) {
+        await apiFetch("/api/favorites", {
+          method: "POST",
+          body: { serviceId: service.id },
+        });
+        toast.success("Saved to favorites");
+      } else {
+        await apiFetch(`/api/favorites/${service.id}`, { method: "DELETE" });
+        toast.success("Removed from favorites");
+      }
+    } catch (err) {
+      // Revert both the card and the parent's view on failure.
+      setIsFav(!nextFav);
+      onFavoriteChange?.(service.id, !nextFav);
+      toast.error(err instanceof Error ? err.message : "Could not update favorites.");
+    } finally {
+      pendingRef.current = false;
+    }
+  }
 
   return (
     <Card
@@ -38,9 +79,33 @@ export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
               {fmtDuration(service.durationMin)}
             </span>
           </div>
-          <span className="text-lg font-bold tabular-nums">
-            {fmtMoney(service.price)}
-          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <span className="text-lg font-bold tabular-nums">
+              {fmtMoney(service.price)}
+            </span>
+            {canFavorite && (
+              <button
+                type="button"
+                aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+                title={isFav ? "Remove from favorites" : "Add to favorites"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void toggleFavorite();
+                }}
+                className={cn(
+                  "inline-flex size-8 items-center justify-center rounded-full transition-all duration-150 hover:scale-110 active:scale-95",
+                  isFav
+                    ? "text-rose-500"
+                    : "text-muted-foreground hover:bg-muted hover:text-rose-500",
+                )}
+              >
+                <Heart
+                  className={cn("size-4", isFav && "fill-rose-500 text-rose-500")}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+          </div>
         </div>
 
         <div>
@@ -100,7 +165,7 @@ export function ServiceCard({ service, onBook, className }: ServiceCardProps) {
 
       <CardFooter className="border-t p-4">
         <Button
-          className="w-full"
+          className="press w-full"
           disabled={!service.providers.length || !next}
           onClick={() => onBook(service.id)}
         >

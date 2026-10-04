@@ -75,7 +75,7 @@ export function AuthView() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-12 sm:px-6">
+    <div className="view-enter mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-12 sm:px-6">
       <div className="text-center">
         <span className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-md">
           <CalendarCheck className="size-6" />

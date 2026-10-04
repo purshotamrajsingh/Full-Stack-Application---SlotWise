@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   Bell,
   BellRing,
+  CalendarCheck,
   CalendarPlus,
   CalendarX2,
   CalendarRange,
@@ -49,7 +50,7 @@ import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime, useNotifications } from "@/hooks/use-realtime";
 import { apiFetch, downloadIcs } from "@/lib/client-api";
 import type { BookingDTO, WaitlistDTO } from "@/lib/types";
-import { fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast } from "@/lib/format";
+import { addDaysKey, fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast, todayKey } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Tab = "upcoming" | "past" | "cancelled" | "waitlist";
@@ -187,7 +188,7 @@ export function MyBookingsView() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+    <div className="view-enter mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">My bookings</h1>
         <p className="mt-1 text-muted-foreground">
@@ -386,8 +387,20 @@ function WaitlistCard({
   entry: WaitlistDTO;
   onChanged: () => void;
 }) {
+  const nav = useUIStore((s) => s.nav);
+  const openBooking = useUIStore((s) => s.openBooking);
   const [busy, setBusy] = useState(false);
   const alerted = Boolean(entry.notifiedAt);
+
+  /** Deep-link: open the booking dialog pre-filled for this watched slot. */
+  function deepLink() {
+    const day = entry.startAt.slice(0, 10);
+    if (day < todayKey() || day > addDaysKey(todayKey(), 13)) {
+      toast.info("That date is beyond the 14-day picker — showing the soonest days instead");
+    }
+    nav("browse");
+    openBooking(entry.serviceId, { providerId: entry.providerId, date: day });
+  }
 
   async function remove() {
     setBusy(true);
@@ -457,15 +470,30 @@ function WaitlistCard({
 
         <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
           <span className="text-base font-bold tabular-nums">{fmtMoney(entry.price)}</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={remove}
-            disabled={busy}
-            className="hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" /> Remove
-          </Button>
+          <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:items-center">
+            {alerted ? (
+              <Button
+                size="sm"
+                onClick={deepLink}
+                className="bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-600 dark:hover:bg-violet-500"
+              >
+                <CalendarCheck className="size-3.5" /> Book this slot
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={deepLink}>
+                <CalendarRange className="size-3.5" /> View calendar
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={remove}
+              disabled={busy}
+              className="hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" /> Remove
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

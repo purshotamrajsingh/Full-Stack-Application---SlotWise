@@ -1,0 +1,771 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useMemo, useState } from "react";
+     4→import {
+     5→  ArrowLeft,
+     6→  ArrowRight,
+     7→  Bell,
+     8→  BellRing,
+     9→  CalendarCheck,
+    10→  CalendarPlus,
+    11→  CalendarX2,
+    12→  CheckCircle2,
+    13→  Clock,
+    14→  Loader2,
+    15→  LogIn,
+    16→  Plane,
+    17→  Sparkles,
+    18→} from "lucide-react";
+    19→import { toast } from "sonner";
+    20→import { Button } from "@/components/ui/button";
+    21→import {
+    22→  Dialog,
+    23→  DialogContent,
+    24→  DialogDescription,
+    25→  DialogHeader,
+    26→  DialogTitle,
+    27→} from "@/components/ui/dialog";
+    28→import { Skeleton } from "@/components/ui/skeleton";
+    29→import { Textarea } from "@/components/ui/textarea";
+    30→import { Badge } from "@/components/ui/badge";
+    31→import { StarRating } from "@/components/slotwise/star-rating";
+    32→import { useAuthStore } from "@/store/auth-store";
+    33→import { useUIStore } from "@/store/ui-store";
+    34→import { useApiQuery } from "@/hooks/use-api-query";
+    35→import { useSlotsWatch, useTimeOffWatch } from "@/hooks/use-realtime";
+    36→import { apiFetch, ApiClientError, downloadIcs } from "@/lib/client-api";
+    37→import type { BookingDTO, ServiceDTO, SlotDTO } from "@/lib/types";
+    38→import {
+    39→  addDaysKey,
+    40→  fmtDateShortUTC,
+    41→  fmtDateUTC,
+    42→  fmtDuration,
+    43→  fmtMoney,
+    44→  fmtTimeUTC,
+    45→  slotGroupLabel,
+    46→  todayKey,
+    47→  WEEKDAY_SHORT,
+    48→} from "@/lib/format";
+    49→import { cn } from "@/lib/utils";
+    50→
+    51→interface SlotsResponse {
+    52→  slots: SlotDTO[];
+    53→  durationMin: number;
+    54→  /** Time-off windows overlapping the viewed day (public info). */
+    55→  timeOff?: { startAt: string; endAt: string; reason: string }[];
+    56→}
+    57→
+    58→const DAYS_AHEAD = 14;
+    59→
+    60→export function BookingDialog() {
+    61→  const user = useAuthStore((s) => s.user);
+    62→  const bookingServiceId = useUIStore((s) => s.bookingServiceId);
+    63→  const rescheduleBookingId = useUIStore((s) => s.rescheduleBookingId);
+    64→  const bookingProviderId = useUIStore((s) => s.bookingProviderId);
+    65→  const bookingDate = useUIStore((s) => s.bookingDate);
+    66→  const closeBooking = useUIStore((s) => s.closeBooking);
+    67→  const goAuth = useUIStore((s) => s.goAuth);
+    68→  const nav = useUIStore((s) => s.nav);
+    69→
+    70→  const open = bookingServiceId !== null || rescheduleBookingId !== null;
+    71→  const rescheduleMode = rescheduleBookingId !== null;
+    72→
+    73→  const [service, setService] = useState<ServiceDTO | null>(null);
+    74→  const [existing, setExisting] = useState<BookingDTO | null>(null);
+    75→  const [providerId, setProviderId] = useState<string | null>(null);
+    76→  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+    77→  const [date, setDate] = useState(todayKey());
+    78→  const [selectedSlot, setSelectedSlot] = useState<SlotDTO | null>(null);
+    79→  const [notes, setNotes] = useState("");
+    80→  const [submitting, setSubmitting] = useState(false);
+    81→  /** Freshly created booking (success screen's "Add to calendar"). */
+    82→  const [createdId, setCreatedId] = useState<string | null>(null);
+    83→  /** Waitlist watches made in this dialog session: slot startAt → entry id. */
+    84→  const [watched, setWatched] = useState<Record<string, string>>({});
+    85→  /** The slot the user had selected when someone else grabbed it. */
+    86→  const [stolen, setStolen] = useState<SlotDTO | null>(null);
+    87→  /** Dialog was deep-linked from a waitlist alert (drives the violet chip). */
+    88→  const [fromWaitlist, setFromWaitlist] = useState(false);
+    89→
+    90→  // Resolve service (create) or booking (reschedule) when the dialog opens.
+    91→  useEffect(() => {
+    92→    if (!open) return;
+    93→    setStep(1);
+    94→    setSelectedSlot(null);
+    95→    setNotes("");
+    96→    setDate(todayKey());
+    97→    setProviderId(null);
+    98→    setService(null);
+    99→    setExisting(null);
+   100→    setCreatedId(null);
+   101→    setWatched({});
+   102→    setStolen(null);
+   103→    setFromWaitlist(Boolean(bookingProviderId));
+   104→
+   105→    if (rescheduleBookingId) {
+   106→      apiFetch<{ items: BookingDTO[] }>("/api/bookings")
+   107→        .then((res) => {
+   108→          const booking = res.items.find((b) => b.id === rescheduleBookingId);
+   109→          if (!booking) {
+   110→            toast.error("Booking not found.");
+   111→            closeBooking();
+   112→            return;
+   113→          }
+   114→          setExisting(booking);
+   115→          setProviderId(booking.providerId);
+   116→          setStep(2);
+   117→        })
+   118→        .catch(() => toast.error("Could not load the booking."));
+   119→    }
+   120→  }, [open, rescheduleBookingId, closeBooking, bookingProviderId]);
+   121→
+   122→  useEffect(() => {
+   123→    if (!open || rescheduleBookingId) return;
+   124→    apiFetch<{ items: ServiceDTO[] }>("/api/services")
+   125→      .then((res) => {
+   126→        const svc = res.items.find((s) => s.id === bookingServiceId);
+   127→        if (!svc) {
+   128→          toast.error("Service not found.");
+   129→          closeBooking();
+   130→          return;
+   131→        }
+   132→        setService(svc);
+   133→        // Waitlist deep-link: jump straight to the time picker when the hint
+   134→        // names a provider who actually delivers this service.
+   135→        const hintedProvider =
+   136→          bookingProviderId &&
+   137→          svc.providers.some((p) => p.id === bookingProviderId)
+   138→            ? bookingProviderId
+   139→            : null;
+   140→        setFromWaitlist(Boolean(hintedProvider));
+   141→        if (hintedProvider) {
+   142→          setProviderId(hintedProvider);
+   143→          setStep(2);
+   144→        } else if (svc.providers.length === 1) {
+   145→          setProviderId(svc.providers[0]!.id);
+   146→          setStep(2);
+   147→        }
+   148→        // Date hint: honoured only inside the 14-day picker window (the
+   149→        // reset effect above already fell back to today).
+   150→        if (bookingDate) {
+   151→          const first = todayKey();
+   152→          const last = addDaysKey(first, DAYS_AHEAD - 1);
+   153→          if (bookingDate >= first && bookingDate <= last) setDate(bookingDate);
+   154→        }
+   155→      })
+   156→      .catch(() => toast.error("Could not load the service."));
+   157→  }, [
+   158→    open,
+   159→    bookingServiceId,
+   160→    rescheduleBookingId,
+   161→    bookingProviderId,
+   162→    bookingDate,
+   163→    closeBooking,
+   164→  ]);
+   165→
+   166→  const effectiveServiceId = rescheduleMode
+   167→    ? existing?.serviceId ?? null
+   168→    : bookingServiceId;
+   169→
+   170→  const slotsPath = useMemo(
+   171→    () =>
+   172→      providerId && effectiveServiceId
+   173→        ? `/api/providers/${providerId}/slots?date=${date}&serviceId=${effectiveServiceId}`
+   174→        : null,
+   175→    [providerId, effectiveServiceId, date],
+   176→  );
+   177→  const { data: slotsData, loading: slotsLoading, reload: reloadSlots } =
+   178→    useApiQuery<SlotsResponse>(open && step === 2 ? slotsPath : null);
+   179→
+   180→  // The signed-in customer's own active bookings with this provider — used to
+   181→  // hide waitlist bells on slots they already (partially) hold themselves.
+   182→  const myBookingsPath = useMemo(() => {
+   183→    if (!user || !open || step !== 2) return null;
+   184→    const first = todayKey();
+   185→    const last = addDaysKey(first, DAYS_AHEAD + 1);
+   186→    return `/api/bookings?from=${first}&to=${last}&sort=date_asc`;
+   187→  }, [user, open, step]);
+   188→  const { data: myBookingsData } = useApiQuery<{ items: BookingDTO[] }>(myBookingsPath);
+   189→  const ownProviderBusy = useMemo(
+   190→    () =>
+   191→      (myBookingsData?.items ?? []).filter(
+   192→        (b) =>
+   193→          b.providerId === providerId &&
+   194→          (b.status === "PENDING" || b.status === "CONFIRMED"),
+   195→      ),
+   196→    [myBookingsData, providerId],
+   197→  );
+   198→
+   199→  // Live slot grid: follow this provider's public availability channel while
+   200→  // the picker is open. If someone else takes a slot on the viewed date, the
+   201→  // grid refreshes instantly — and if they took the slot this user had
+   202→  // selected, bounce them back to the grid with a warning + waitlist offer.
+   203→  const { connected: slotsLive } = useSlotsWatch(
+   204→    open && step === 2 ? providerId : null,
+   205→    open && step === 2 ? date : null,
+   206→    (msg) => {
+   207→      if (msg.providerId !== providerId || msg.date !== date) return;
+   208→      reloadSlots();
+   209→      if (
+   210→        selectedSlot &&
+   211→        msg.startAt <= selectedSlot.endAt &&
+   212→        msg.endAt >= selectedSlot.startAt
+   213→      ) {
+   214→        setStolen(selectedSlot);
+   215→        setSelectedSlot(null);
+   216→        toast.error("Someone just took that slot", {
+   217→          description: "The grid has been updated — pick a new time, or watch it below.",
+   218→        });
+   219→      }
+   220→    },
+   221→  );
+   222→
+   223→  // The provider's time off can also change while the picker is open —
+   224→  // (they block a holiday from another tab) — refresh the grid when it does.
+   225→  useTimeOffWatch(open && step === 2 ? providerId : null, (msg) => {
+   226→    if (msg.providerId !== providerId) return;
+   227→    if (!msg.dates.includes(date)) return;
+   228→    reloadSlots();
+   229→    setSelectedSlot(null);
+   230→    toast.info("Availability just changed", {
+   231→      description: "The provider updated their schedule — the grid has been refreshed.",
+   232→    });
+   233→  });
+   234→
+   235→  const chosenProvider = service?.providers.find((p) => p.id === providerId);
+   236→  const durationMin = rescheduleMode
+   237→    ? existing?.durationMin ?? 0
+   238→    : service?.durationMin ?? 0;
+   239→  const price = rescheduleMode ? existing?.price ?? 0 : service?.price ?? 0;
+   240→  const serviceName = rescheduleMode ? existing?.serviceName : service?.name;
+   241→  const dates = useMemo(
+   242→    () => Array.from({ length: DAYS_AHEAD }, (_, i) => addDaysKey(todayKey(), i)),
+   243→    [],
+   244→  );
+   245→
+   246→  const slots = slotsData?.slots ?? [];
+   247→  /** The time-off window covering most of this day, if any (for the banner). */
+   248→  const dayBlocked = (slotsData?.timeOff ?? []).find(
+   249→    (w) => w.startAt.slice(0, 10) <= date && w.endAt.slice(0, 10) > date,
+   250→  );
+   251→  const grouped = useMemo(() => {
+   252→    const groups = new Map<string, SlotDTO[]>();
+   253→    for (const s of slots) {
+   254→      const hour = new Date(s.startAt).getUTCHours();
+   255→      const label = slotGroupLabel(hour);
+   256→      const list = groups.get(label) ?? [];
+   257→      list.push(s);
+   258→      groups.set(label, list);
+   259→    }
+   260→    return [...groups.entries()];
+   261→  }, [slots]);
+   262→
+   263→  /** Join the waitlist for a taken slot (one-shot alert when it frees). */
+   264→  async function joinWaitlist(slot: SlotDTO) {
+   265→    if (!providerId || !effectiveServiceId) return;
+   266→    if (!user) {
+   267→      toast.info("Sign in to watch slots", {
+   268→        description: "Create a free account to get alerts when slots open up.",
+   269→      });
+   270→      return;
+   271→    }
+   272→    try {
+   273→      const res = await apiFetch<{ entry: { id: string } }>("/api/waitlist", {
+   274→        method: "POST",
+   275→        body: {
+   276→          providerId,
+   277→          serviceId: effectiveServiceId,
+   278→          startAt: slot.startAt,
+   279→          endAt: slot.endAt,
+   280→        },
+   281→      });
+   282→      setWatched((w) => ({ ...w, [slot.startAt]: res.entry.id }));
+   283→      setStolen(null);
+   284→      toast.success(`Watching ${fmtTimeUTC(slot.startAt)} — we'll ping you if it frees up`, {
+   285→        description: "Find it under My bookings → Waitlist.",
+   286→      });
+   287→    } catch (err) {
+   288→      if (err instanceof ApiClientError) {
+   289→        if (err.code === "ALREADY_WATCHING") {
+   290→          toast.info("You're already watching that slot.");
+   291→          setStolen(null);
+   292→        } else if (err.code === "ALREADY_BOOKED") {
+   293→          toast.info("That's your own booking — you already hold this slot.");
+   294→          setStolen(null);
+   295→        } else {
+   296→          toast.error(err.message);
+   297→        }
+   298→      } else {
+   299→        toast.error("Could not join the waitlist.");
+   300→      }
+   301→    }
+   302→  }
+   303→
+   304→  /** Stop watching a slot joined earlier in this dialog session. */
+   305→  async function unwatch(startAt: string) {
+   306→    const id = watched[startAt];
+   307→    if (!id) return;
+   308→    try {
+   309→      await apiFetch(`/api/waitlist/${id}`, { method: "DELETE" });
+   310→      setWatched((prev) => {
+   311→        const next = { ...prev };
+   312→        delete next[startAt];
+   313→        return next;
+   314→      });
+   315→      toast.info(`Stopped watching ${fmtTimeUTC(startAt)}.`);
+   316→    } catch {
+   317→      toast.error("Could not remove the watch.");
+   318→    }
+   319→  }
+   320→
+   321→  async function confirm() {
+   322→    if (!selectedSlot || !providerId || !effectiveServiceId) return;
+   323→    setSubmitting(true);
+   324→    try {
+   325→      if (rescheduleMode && existing) {
+   326→        await apiFetch<{ booking: BookingDTO }>(
+   327→          `/api/bookings/${existing.id}`,
+   328→          { method: "PATCH", body: { startAt: selectedSlot.startAt } },
+   329→        );
+   330→        toast.success("Booking rescheduled.");
+   331→        setStep(4);
+   332→      } else {
+   333→        const res = await apiFetch<{ booking: BookingDTO }>("/api/bookings", {
+   334→          method: "POST",
+   335→          body: {
+   336→            serviceId: effectiveServiceId,
+   337→            providerId,
+   338→            startAt: selectedSlot.startAt,
+   339→            notes: notes.trim() || undefined,
+   340→          },
+   341→        });
+   342→        setCreatedId(res.booking.id);
+   343→        toast.success("Booking confirmed — see you soon!");
+   344→        setStep(4);
+   345→      }
+   346→    } catch (err) {
+   347→      const message = err instanceof Error ? err.message : "Booking failed.";
+   348→      toast.error(message);
+   349→      setStep(2);
+   350→      setSelectedSlot(null);
+   351→      reloadSlots();
+   352→    } finally {
+   353→      setSubmitting(false);
+   354→    }
+   355→  }
+   356→
+   357→  const titles: Record<number, string> = {
+   358→    1: "Choose a provider",
+   359→    2: rescheduleMode ? "Pick a new time" : "Pick a time",
+   360→    3: "Confirm your booking",
+   361→    4: rescheduleMode ? "Rescheduled" : "You're booked in",
+   362→  };
+   363→
+   364→  return (
+   365→    <Dialog
+   366→      open={open}
+   367→      onOpenChange={(next) => {
+   368→        if (!next) closeBooking();
+   369→      }}
+   370→    >
+   371→      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-slim sm:max-w-lg">
+   372→        <DialogHeader>
+   373→          <DialogTitle className="flex items-center gap-2 text-lg">
+   374→            {step === 4 ? (
+   375→              <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400" />
+   376→            ) : (
+   377→              <CalendarCheck className="size-5 text-primary" />
+   378→            )}
+   379→            {titles[step]}
+   380→          </DialogTitle>
+   381→          <DialogDescription>
+   382→            {serviceName ?? "…"}
+   383→            {durationMin > 0 && (
+   384→              <>
+   385→                {" · "}
+   386→                {fmtDuration(durationMin)}
+   387→                {price > 0 && ` · ${fmtMoney(price)}`}
+   388→              </>
+   389→            )}
+   390→          </DialogDescription>
+   391→        </DialogHeader>
+   392→
+   393→        {/* Login gate */}
+   394→        {step < 4 && !user && (
+   395→          <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-muted/40 px-6 py-8 text-center">
+   396→            <LogIn className="size-8 text-muted-foreground" />
+   397→            <p className="font-medium">Sign in to book</p>
+   398→            <p className="text-sm text-muted-foreground">
+   399→              Create a free account — it takes 20 seconds and keeps your booking
+   400→              history in one place.
+   401→            </p>
+   402→            <Button onClick={() => goAuth("Sign in to finish your booking")}>
+   403→              Sign in or create an account
+   404→            </Button>
+   405→          </div>
+   406→        )}
+   407→
+   408→        {/* Step 1 — provider */}
+   409→        {step === 1 && user && service && (
+   410→          <div className="flex flex-col gap-2">
+   411→            {service.providers.map((p) => (
+   412→              <button
+   413→                key={p.id}
+   414→                type="button"
+   415→                onClick={() => {
+   416→                  setProviderId(p.id);
+   417→                  setStep(2);
+   418→                }}
+   419→                className="flex items-center justify-between gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-secondary/60"
+   420→              >
+   421→                <div className="min-w-0">
+   422→                  <p className="font-medium">{p.name}</p>
+   423→                  {p.specialty && (
+   424→                    <p className="truncate text-sm text-muted-foreground">
+   425→                      {p.specialty}
+   426→                    </p>
+   427→                  )}
+   428→                  {p.reviewCount > 0 && (
+   429→                    <StarRating value={p.rating} count={p.reviewCount} className="mt-1" />
+   430→                  )}
+   431→                </div>
+   432→                <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+   433→              </button>
+   434→            ))}
+   435→          </div>
+   436→        )}
+   437→
+   438→        {/* Step 2 — date & time */}
+   439→        {step === 2 && user && (
+   440→          <div className="flex flex-col gap-4">
+   441→            {fromWaitlist && !rescheduleMode && (
+   442→              <div className="flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-700 dark:text-violet-300">
+   443→                <Sparkles className="size-3.5 shrink-0" />
+   444→                <p className="truncate">
+   445→                  From your waitlist — {service?.name ?? "this service"} with{" "}
+   446→                  {chosenProvider?.name ?? "your provider"}
+   447→                </p>
+   448→              </div>
+   449→            )}
+   450→            {step === 2 && providerId && !rescheduleMode && chosenProvider && (
+   451→              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
+   452→                <span className="font-medium">{chosenProvider.name}</span>
+   453→                <button
+   454→                  type="button"
+   455→                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+   456→                  onClick={() => {
+   457→                    setStep(1);
+   458→                    setSelectedSlot(null);
+   459→                  }}
+   460→                >
+   461→                  change
+   462→                </button>
+   463→              </div>
+   464→            )}
+   465→
+   466→            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 no-scrollbar">
+   467→              {dates.map((d) => {
+   468→                const dt = new Date(`${d}T00:00:00.000Z`);
+   469→                const isToday = d === todayKey();
+   470→                return (
+   471→                  <button
+   472→                    key={d}
+   473→                    type="button"
+   474→                    onClick={() => {
+   475→                      setDate(d);
+   476→                      setSelectedSlot(null);
+   477→                    }}
+   478→                    className={cn(
+   479→                      "flex w-14 shrink-0 flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-center transition-colors",
+   480→                      date === d
+   481→                        ? "border-primary bg-primary text-primary-foreground"
+   482→                        : "hover:border-primary/40 hover:bg-secondary/60",
+   483→                    )}
+   484→                  >
+   485→                    <span
+   486→                      className={cn(
+   487→                        "text-[10px] font-medium uppercase",
+   488→                        date === d ? "text-primary-foreground/80" : "text-muted-foreground",
+   489→                      )}
+   490→                    >
+   491→                      {WEEKDAY_SHORT[dt.getUTCDay()]}
+   492→                    </span>
+   493→                    <span className="text-sm font-bold tabular-nums">
+   494→                      {dt.getUTCDate()}
+   495→                    </span>
+   496→                    <span
+   497→                      className={cn(
+   498→                        "text-[10px]",
+   499→                        date === d ? "text-primary-foreground/80" : "text-muted-foreground",
+   500→                      )}
+   501→                    >
+   502→                      {isToday ? "today" : dt.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}
+   503→                    </span>
+   504→                  </button>
+   505→                );
+   506→              })}
+   507→            </div>
+   508→
+   509→            {slotsLoading ? (
+   510→              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+   511→                {Array.from({ length: 12 }).map((_, i) => (
+   512→                  <Skeleton key={i} className="h-9 w-full" />
+   513→                ))}
+   514→              </div>
+   515→            ) : slots.length === 0 ? (
+   516→              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+   517→                <CalendarX2 className="size-6" />
+   518→                No working hours on this day — try another date.
+   519→              </div>
+   520→            ) : (
+   521→              <div className="flex flex-col gap-3">
+   522→                {dayBlocked && (
+   523→                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm">
+   524→                    <Plane className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+   525→                    <p className="text-amber-800 dark:text-amber-300">
+   526→                      <span className="font-semibold">Away on this day</span>
+   527→                      {dayBlocked.reason && <> — {dayBlocked.reason}</>}
+   528→                      <span className="block text-xs opacity-80">
+   529→                        Pick another day, or check a different provider.
+   530→                      </span>
+   531→                    </p>
+   532→                  </div>
+   533→                )}
+   534→                {slotsLive && !dayBlocked && (
+   535→                  <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+   536→                    <span className="relative flex size-2">
+   537→                      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500 opacity-60" />
+   538→                      <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+   539→                    </span>
+   540→                    Live availability — greyed slots are taken · {""}
+   541→                    <span className="inline-flex items-center gap-0.5 font-medium text-foreground/70">
+   542→                      <Bell className="size-3" /> tap the bell to get alerts
+   543→                    </span>
+   544→                  </p>
+   545→                )}
+   546→                {stolen && user && (
+   547→                  <div
+   548→                    role="status"
+   549→                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm"
+   550→                  >
+   551→                    <p className="text-amber-800 dark:text-amber-300">
+   552→                      <span className="font-semibold">
+   553→                        {fmtTimeUTC(stolen.startAt)} was just taken.
+   554→                      </span>{" "}
+   555→                      We can ping you if it frees up.
+   556→                    </p>
+   557→                    <Button
+   558→                      size="sm"
+   559→                      variant="outline"
+   560→                      className="h-8 shrink-0 gap-1.5 border-amber-500/40 bg-card hover:bg-amber-500/20 dark:hover:bg-amber-500/20"
+   561→                      onClick={() => joinWaitlist(stolen)}
+   562→                    >
+   563→                      <BellRing className="size-3.5" />
+   564→                      Watch it
+   565→                    </Button>
+   566→                  </div>
+   567→                )}
+   568→                {grouped.map(([label, group]) => (
+   569→                  <div key={label}>
+   570→                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   571→                      {label}
+   572→                    </p>
+   573→                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+   574→                      {group.map((s) => {
+   575→                        const watchable =
+   576→                          !s.available &&
+   577→                          s.blockedBy === "booking" &&
+   578→                          !!user &&
+   579→                          !ownProviderBusy.some(
+   580→                            (b) => b.startAt < s.endAt && b.endAt > s.startAt,
+   581→                          );
+   582→                        const isWatched = Boolean(watched[s.startAt]);
+   583→                        return (
+   584→                          <div key={s.startAt} className="relative">
+   585→                            <button
+   586→                              type="button"
+   587→                              disabled={!s.available}
+   588→                              onClick={() => setSelectedSlot(s)}
+   589→                              className={cn(
+   590→                                "w-full rounded-md border px-2 py-2 text-sm font-medium tabular-nums transition-colors",
+   591→                                !s.available
+   592→                                  ? "cursor-not-allowed border-muted bg-muted/40 text-muted-foreground/50 line-through"
+   593→                                  : selectedSlot?.startAt === s.startAt
+   594→                                    ? "border-primary bg-primary text-primary-foreground"
+   595→                                    : "hover:border-primary/50 hover:bg-secondary/60",
+   596→                              )}
+   597→                            >
+   598→                              {fmtTimeUTC(s.startAt)}
+   599→                            </button>
+   600→                            {watchable && (
+   601→                              <button
+   602→                                type="button"
+   603→                                aria-label={
+   604→                                  isWatched
+   605→                                    ? `Stop watching the ${fmtTimeUTC(s.startAt)} slot`
+   606→                                    : `Get notified if the ${fmtTimeUTC(s.startAt)} slot frees up`
+   607→                                }
+   608→                                title={
+   609→                                  isWatched
+   610→                                    ? "Watching — click to stop"
+   611→                                    : "Get notified if this slot frees up"
+   612→                                }
+   613→                                onClick={() =>
+   614→                                  isWatched ? unwatch(s.startAt) : joinWaitlist(s)
+   615→                                }
+   616→                                className={cn(
+   617→                                  "absolute -right-1 -top-1.5 flex size-4.5 items-center justify-center rounded-full border shadow-sm transition-all",
+   618→                                  isWatched
+   619→                                    ? "border-primary bg-primary text-primary-foreground"
+   620→                                    : "border-border bg-card text-muted-foreground hover:scale-110 hover:border-primary/50 hover:text-primary",
+   621→                                )}
+   622→                              >
+   623→                                {isWatched ? (
+   624→                                  <BellRing className="size-2.5" />
+   625→                                ) : (
+   626→                                  <Bell className="size-2.5" />
+   627→                                )}
+   628→                              </button>
+   629→                            )}
+   630→                          </div>
+   631→                        );
+   632→                      })}
+   633→                    </div>
+   634→                  </div>
+   635→                ))}
+   636→              </div>
+   637→            )}
+   638→
+   639→            <Button
+   640→              disabled={!selectedSlot}
+   641→              onClick={() => setStep(3)}
+   642→              className="w-full"
+   643→            >
+   644→              Continue
+   645→              <ArrowRight className="size-4" />
+   646→            </Button>
+   647→          </div>
+   648→        )}
+   649→
+   650→        {/* Step 3 — confirm */}
+   651→        {step === 3 && user && selectedSlot && (
+   652→          <div className="flex flex-col gap-4">
+   653→            <div className="rounded-lg border bg-muted/40 p-4">
+   654→              <div className="flex flex-col gap-2 text-sm">
+   655→                <Row label="Service" value={serviceName ?? "—"} />
+   656→                <Row
+   657→                  label="Provider"
+   658→                  value={
+   659→                    rescheduleMode
+   660→                      ? existing?.providerName ?? "—"
+   661→                      : chosenProvider?.name ?? "—"
+   662→                  }
+   663→                />
+   664→                <Row label="Date" value={fmtDateUTC(selectedSlot.startAt)} />
+   665→                <Row
+   666→                  label="Time"
+   667→                  value={`${fmtTimeUTC(selectedSlot.startAt)} – ${fmtTimeUTC(selectedSlot.endAt)} (UTC)`}
+   668→                />
+   669→                <Row label="Duration" value={fmtDuration(durationMin)} />
+   670→                <div className="mt-1 flex items-center justify-between border-t pt-2 text-base font-semibold">
+   671→                  <span>Total</span>
+   672→                  <span className="tabular-nums">{fmtMoney(price)}</span>
+   673→                </div>
+   674→              </div>
+   675→            </div>
+   676→
+   677→            {!rescheduleMode && (
+   678→              <div className="flex flex-col gap-1.5">
+   679→                <label
+   680→                  htmlFor="booking-notes"
+   681→                  className="text-sm font-medium"
+   682→                >
+   683→                  Notes for the provider <span className="text-muted-foreground">(optional)</span>
+   684→                </label>
+   685→                <Textarea
+   686→                  id="booking-notes"
+   687→                  placeholder="Anything they should know? Parking, access, preferences…"
+   688→                  value={notes}
+   689→                  maxLength={300}
+   690→                  onChange={(e) => setNotes(e.target.value)}
+   691→                />
+   692→              </div>
+   693→            )}
+   694→
+   695→            <div className="flex gap-2">
+   696→              <Button variant="outline" onClick={() => setStep(2)}>
+   697→                <ArrowLeft className="size-4" />
+   698→                Back
+   699→              </Button>
+   700→              <Button className="flex-1" onClick={confirm} disabled={submitting}>
+   701→                {submitting && <Loader2 className="size-4 animate-spin" />}
+   702→                {rescheduleMode ? "Confirm reschedule" : "Confirm booking"}
+   703→              </Button>
+   704→            </div>
+   705→          </div>
+   706→        )}
+   707→
+   708→        {/* Step 4 — success */}
+   709→        {step === 4 && selectedSlot && (
+   710→          <div className="flex flex-col items-center gap-4 py-4 text-center">
+   711→            <div className="flex size-16 animate-in zoom-in-50 duration-500 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
+   712→              <CheckCircle2 className="size-9 text-emerald-600 dark:text-emerald-400" />
+   713→            </div>
+   714→            <div>
+   715→              <p className="text-lg font-semibold">{serviceName}</p>
+   716→              <p className="mt-1 flex items-center justify-center gap-2 text-muted-foreground">
+   717→                <Clock className="size-4" />
+   718→                {fmtDateUTC(selectedSlot.startAt)} · {fmtTimeUTC(selectedSlot.startAt)} –{" "}
+   719→                {fmtTimeUTC(selectedSlot.endAt)}
+   720→              </p>
+   721→              {!rescheduleMode && (
+   722→                <Badge variant="secondary" className="mt-3">
+   723→                  Status: Pending confirmation
+   724→                </Badge>
+   725→              )}
+   726→            </div>
+   727→            {!rescheduleMode && createdId && (
+   728→              <Button
+   729→                variant="outline"
+   730→                className="w-full"
+   731→                onClick={() =>
+   732→                  downloadIcs(createdId).catch((err) =>
+   733→                    toast.error(err instanceof Error ? err.message : "Download failed."),
+   734→                  )
+   735→                }
+   736→              >
+   737→                <CalendarPlus className="size-4" />
+   738→                Add to calendar (.ics)
+   739→              </Button>
+   740→            )}
+   741→            <div className="flex w-full gap-2">
+   742→              <Button
+   743→                variant="outline"
+   744→                className="flex-1"
+   745→                onClick={() => {
+   746→                  closeBooking();
+   747→                  nav("bookings");
+   748→                }}
+   749→              >
+   750→                View my bookings
+   751→              </Button>
+   752→              <Button className="flex-1" onClick={closeBooking}>
+   753→                Done
+   754→              </Button>
+   755→            </div>
+   756→          </div>
+   757→        )}
+   758→      </DialogContent>
+   759→    </Dialog>
+   760→  );
+   761→}
+   762→
+   763→function Row({ label, value }: { label: string; value: string }) {
+   764→  return (
+   765→    <div className="flex items-center justify-between gap-4">
+   766→      <span className="text-muted-foreground">{label}</span>
+   767→      <span className="font-medium">{value}</span>
+   768→    </div>
+   769→  );
+   770→}
+   771→

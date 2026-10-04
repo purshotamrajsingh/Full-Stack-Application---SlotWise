@@ -60,6 +60,8 @@ export async function notifyFreedSlot(
         userId: entry.userId,
         serviceName: entry.service.name,
         providerName: entry.provider.user.name,
+        serviceId: entry.serviceId,
+        providerId: entry.providerId,
         startAt: entry.startAt,
         endAt: entry.endAt,
       });

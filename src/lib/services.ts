@@ -37,9 +37,12 @@ interface ReviewRow {
 /**
  * Enriches services with provider summaries, ratings, booking counts and the
  * earliest bookable slot over the next 7 days ("next available").
+ * When a viewer id is supplied (customer), each DTO is stamped with
+ * `isFavorite` so Browse can render heart state without a second request.
  */
 export async function enrichServices(
   services: ServiceWithProviders[],
+  viewerId?: string | null,
 ): Promise<ServiceDTO[]> {
   const now = new Date();
 
@@ -70,6 +73,16 @@ export async function enrichServices(
   const countMap = new Map(
     bookingCounts.map((c) => [c.serviceId, c._count]),
   );
+
+  // Hearted services for the viewing customer (single query, set lookup).
+  const favoriteIds = new Set<string>();
+  if (viewerId) {
+    const favs = await db.favorite.findMany({
+      where: { userId: viewerId },
+      select: { serviceId: true },
+    });
+    for (const f of favs) favoriteIds.add(f.serviceId);
+  }
 
   // Next-available computation grouped per provider (one availability/busy fetch each).
   const pairs: {
@@ -131,6 +144,7 @@ export async function enrichServices(
       reviewCount: r?.n ?? 0,
       bookingCount: countMap.get(s.id) ?? 0,
       nextAvailableAt,
+      isFavorite: viewerId ? favoriteIds.has(s.id) : undefined,
     };
   });
 }

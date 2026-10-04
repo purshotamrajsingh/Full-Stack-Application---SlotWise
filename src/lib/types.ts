@@ -48,6 +48,8 @@ export interface ServiceDTO {
   reviewCount: number;
   bookingCount: number;
   nextAvailableAt: string | null;
+  /** True when the signed-in customer hearted this service. */
+  isFavorite?: boolean;
 }
 
 export interface SlotDTO {
@@ -77,8 +79,18 @@ export interface NotificationDTO {
   title: string;
   body: string;
   bookingId: string | null;
+  /** JSON payload powering inline actions (waitlist deep-link). */
+  meta: string | null;
   readAt: string | null;
   createdAt: string;
+}
+
+/** Parsed NotificationDTO.meta for waitlist "slot opened" alerts. */
+export interface WaitlistAlertMeta {
+  serviceId: string;
+  providerId: string;
+  startAt: string;
+  endAt: string;
 }
 
 /** A customer's slot watch entry ("tell me when this frees up"). */

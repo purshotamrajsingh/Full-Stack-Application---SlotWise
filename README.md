@@ -45,6 +45,7 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **CSV export** | Authenticated download of all bookings in a chosen range (RFC-4180 escaping) |
 | **Provider profiles** | Public profile dialog: bio, specialty, weekly schedule grid, bookable services and recent reviews — one click from any provider chip |
 | **Customer insights** | "My bookings" stats: next-visit countdown, upcoming count, completed visits, lifetime spend; landing page testimonials pulled live from verified reviews |
+| **Customer favorites** | Heart any service from its card (rose toggle, optimistic + revert-on-error), then filter Browse with the **♥ Favorites (n)** chip — hearts persist per account and re-seed the cards on every load |
 | **Reviews** | Customers rate completed bookings 1–5; ratings feed search ranking and provider stats. **Reviews can be edited or deleted within 15 minutes** of posting (server-enforced window) |
 | **Responsive UI** | Mobile-first (tested at 375 / 768 / 1280 px), dark mode, sticky footer, toast feedback, skeleton loaders |
 | **Realtime updates** | **Socket.io hub** (mini-service, port 3003): JWT-authenticated room subscriptions (`user:*`, `role:*`, `provider-slots:*`). Providers watch their diary update **live** (new booking / cancel / reschedule toasts, pulsing “Live” pill); the admin dashboard refreshes KPIs + charts in place with an activity ticker; an open booking dialog **greys out slots the instant someone else takes them** — and bounces the selection if the chosen slot was stolen. Privacy-safe by design: the public slot channel carries only timing data, never customer identity |
@@ -53,8 +54,10 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **Calendar invites** | Every booking exports a standards-compliant **RFC 5545 `.ics`** file (VEVENT + 60-minute reminder VALARM) — "Add to calendar" on the booking success screen and on every upcoming card |
 | **Notification inbox** | Mock email outbox: booking receipts, status changes, cancellations, reschedules, time-off conflicts **and waitlist alerts** persist as per-user notifications and **push live** to the header bell — unread badge + toast — with mark-all-read **and click-a-single-item-to-read** |
 | **Slot waitlist** | Customers **watch a taken slot** (little bell on any greyed-out slot in the booking calendar, or the "Watch it" banner that appears the moment someone steals their chosen slot). When the holding booking is cancelled or rescheduled away, every watcher gets a one-shot **"slot opened"** notification (in-app + bell + live toast), and the entry flips to an "alerted" state in My bookings → Waitlist. Server-enforced: only genuinely taken slots are watchable, no duplicates, max 10 active watches, watchers who already hold a conflicting booking are skipped |
+| **Waitlist deep-link** | One click from a "slot opened" notification (inline **Book it** action in the bell) or from an alerted waitlist card (**Book this slot** / **View calendar**) jumps straight into the booking dialog **pre-filled** — right provider, right day, straight at the time picker, with a violet "From your waitlist" chip; dates beyond the 14-day picker fall back to today with a heads-up toast |
 | **Provider insights** | The provider portal's **Insights tab**: revenue / bookings / rating / **utilisation (booked vs open hours)** / repeat-client share / upcoming KPIs, an **8-week performance chart** (booking bars + cumulative revenue area), top-services revenue mix and outcome donut — the same visual language as the admin dashboard |
 | **Admin closures overview** | The Staff tab lists **every provider's upcoming time off** in one card — window reason, "N bookings to move" clash badges — and admins can lift a closure with one click (slots reopen instantly, open booking grids refresh live) |
+| **Admin closure creation** | The Staff tab's "Add closure" dialog blocks **any provider's** calendar — full-day, a date range or part of one day (15-min steps) — with affected-customer notifications surfaced on submit; provider selection sticks for repeat blocks |
 
 ---
 
@@ -200,10 +203,13 @@ Booking     id, customerId → User, providerId → Provider, serviceId → Serv
 Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment
 Notification id, userId → User, type[booking_created|booking_status|booking_cancelled|
             booking_rescheduled|time_off_conflict|waitlist_opened], title, body, bookingId → Booking?,
+            meta? (JSON — powers inline actions such as the waitlist deep-link),
             readAt? — mock email outbox (index: userId, createdAt)
 Waitlist    id, userId → User, providerId → Provider, serviceId → Service, startAt, endAt,
             notifiedAt? — "alert me when this taken slot frees up" entries
             unique (userId, providerId, startAt); index (providerId, startAt)
+Favorite    id, userId → User, serviceId → Service, createdAt — hearted services for the
+            Browse ♥ favorites filter; unique (userId, serviceId)
 ```
 
 Prisma schema: [`prisma/schema.prisma`](prisma/schema.prisma) · Seed: [`prisma/seed.ts`](prisma/seed.ts)
@@ -232,7 +238,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/services` | public | `q, category, minPrice, maxPrice, provider, sort` (`price_asc\|price_desc\|rating\|next_available\|duration\|popular\|name`), `includeInactive=1` (admin) |
+| GET | `/services` | public | `q, category, minPrice, maxPrice, provider, sort` (`price_asc\|price_desc\|rating\|next_available\|duration\|popular\|name`), `includeInactive=1` (admin); rows carry `isFavorite` when a customer is signed in |
 | POST | `/services` | admin | `{ name, category, description?, durationMin, price, isActive?, providerIds? }` |
 | PUT | `/services/:id` | admin | partial update + provider re-link |
 | DELETE | `/services/:id` | admin | soft-deletes (deactivates) when booking history exists |
@@ -250,7 +256,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | PUT | `/providers/me/availability` | provider/admin | full replace; rejects overlapping windows |
 | GET | `/providers/me/analytics` | provider | Insights tab: KPIs (revenue 30d, bookings 30d, rating, **utilisation %**, repeat-client %, upcoming) + 8-week `weekly` series + `serviceMix` + `statusMix` |
 | GET | `/providers/me/time-off` | provider/admin | upcoming + recent windows, each with a live count of affected bookings |
-| POST | `/providers/me/time-off` | provider/admin | `{ date, endDate?, startTime?, endTime?, reason? }` — full-day or partial block; affected customers get a schedule-change notification; `201` returns the window + `notified` count |
+| POST | `/providers/me/time-off` | provider/admin | `{ date, endDate?, startTime?, endTime?, reason? }` — full-day or partial block; affected customers get a schedule-change notification; `201` returns the window + `notified` count. Admins may pass `?providerId=` to block **any** provider's calendar (same contract) |
 | DELETE | `/providers/me/time-off/:id` | provider/admin | removes the block (slot grids refresh live); admins may pass `?providerId=` to lift any staff member's closure |
 
 ### Bookings
@@ -269,7 +275,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/notifications` | any | own inbox — `limit` → `{ items, unread }`; rows are created on booking create/cancel/reschedule/status-change/time-off conflicts **and waitlist alerts**, and pushed live over the realtime hub |
+| GET | `/notifications` | any | own inbox — `limit` → `{ items, unread }`; rows are created on booking create/cancel/reschedule/status-change/time-off conflicts **and waitlist alerts**, and pushed live over the realtime hub; `waitlist_opened` rows carry a `meta` JSON payload (`serviceId`, `providerId`, `startAt`, `endAt`) that powers the bell's inline **Book it** deep-link |
 | POST | `/notifications/read-all` | any | marks the whole inbox read |
 | POST | `/notifications/:id/read` | any (own) | marks a **single** notification read (idempotent) |
 
@@ -280,6 +286,14 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | GET | `/waitlist` | any (own) | the signed-in customer's watched slots, `notifiedAt` included for history |
 | POST | `/waitlist` | customer | `{ providerId, serviceId, startAt, endAt }` — the slot must genuinely be held by a booking (`409 NOT_TAKEN`), no duplicates (`409 ALREADY_WATCHING`), no self-overlap (`400 ALREADY_BOOKED`), max 10 active watches. When the holding booking is cancelled or rescheduled away, each eligible watcher gets a one-shot `waitlist_opened` notification and the entry flips to notified |
 | DELETE | `/waitlist/:id` | any (own) | stop watching |
+
+### Favorites
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/favorites` | customer | own hearted serviceIds (creation order) |
+| POST | `/favorites` | customer | `{ serviceId }` — toggle-safe: fresh heart `201 {alreadyFavorite:false}`, repeat `200 {alreadyFavorite:true}`; `400 UNKNOWN_SERVICE` / `400 INACTIVE_SERVICE` guards |
+| DELETE | `/favorites/:serviceId` | customer | removes the heart (`404 NOT_FOUND` when absent) |
 
 ### Dashboard & misc
 

@@ -186,6 +186,8 @@ export interface NotificationMessage {
   title: string;
   body: string;
   bookingId: string | null;
+  /** JSON payload powering inline actions (waitlist deep-link). */
+  meta: string | null;
   createdAt: string;
 }
 

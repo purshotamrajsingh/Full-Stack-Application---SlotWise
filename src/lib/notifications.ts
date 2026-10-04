@@ -21,6 +21,8 @@ interface CreateInput {
   title: string;
   body: string;
   bookingId?: string | null;
+  /** JSON string powering inline UI actions (e.g. waitlist deep-link). */
+  meta?: string | null;
 }
 
 export async function createNotification(input: CreateInput) {
@@ -31,6 +33,7 @@ export async function createNotification(input: CreateInput) {
       title: input.title,
       body: input.body,
       bookingId: input.bookingId ?? null,
+      meta: input.meta ?? null,
     },
   });
 
@@ -40,6 +43,7 @@ export async function createNotification(input: CreateInput) {
     title: row.title,
     body: row.body,
     bookingId: row.bookingId,
+    meta: row.meta,
     createdAt: row.createdAt.toISOString(),
   };
   emitNotification([row.userId], msg);
@@ -147,13 +151,22 @@ export async function notifyWaitlistOpened(input: {
   userId: string;
   serviceName: string;
   providerName: string;
+  serviceId: string;
+  providerId: string;
   startAt: Date;
   endAt: Date;
 }): Promise<void> {
+  const meta = JSON.stringify({
+    serviceId: input.serviceId,
+    providerId: input.providerId,
+    startAt: input.startAt.toISOString(),
+    endAt: input.endAt.toISOString(),
+  });
   await createNotification({
     userId: input.userId,
     type: "waitlist_opened",
     title: `Slot opened — ${input.serviceName}`,
     body: `The ${fmtTimeUTC(input.startAt.toISOString())} ${input.serviceName} slot with ${input.providerName} on ${fmtDateUTC(input.startAt.toISOString())} just freed up — book it before someone else does.`,
+    meta,
   });
 }

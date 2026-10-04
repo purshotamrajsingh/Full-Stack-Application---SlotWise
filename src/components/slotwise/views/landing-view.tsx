@@ -49,7 +49,7 @@ export function LandingView() {
   const testimonials = (reviewsData?.items ?? []).slice(0, 6);
 
   return (
-    <div className="flex flex-col">
+    <div className="view-enter flex flex-col">
       {/* Hero */}
       <section className="relative overflow-hidden border-b bg-dots">
         <div
@@ -128,6 +128,11 @@ export function LandingView() {
             className="relative mx-auto w-full max-w-md"
             aria-hidden
           >
+            {/* Soft primary glow behind the floating mockup (decorative) */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -inset-6 -z-10 rounded-[2.5rem] bg-primary/15 blur-3xl dark:bg-primary/25"
+            />
             <div className="absolute inset-0 rotate-3 rounded-2xl border bg-card/60" />
             <Card className="animate-float relative gap-0 overflow-hidden py-0 shadow-xl">
               <div className="flex items-center justify-between border-b bg-primary/5 px-5 py-4">

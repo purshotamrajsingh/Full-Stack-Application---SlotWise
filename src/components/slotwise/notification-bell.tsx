@@ -5,6 +5,7 @@ import {
   Bell,
   BellRing,
   CalendarCheck2,
+  CalendarPlus,
   CalendarX2,
   CheckCheck,
   CircleAlert,
@@ -23,7 +24,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useNotifications } from "@/hooks/use-realtime";
 import { apiFetch } from "@/lib/client-api";
-import type { NotificationDTO } from "@/lib/types";
+import type { NotificationDTO, WaitlistAlertMeta } from "@/lib/types";
+import { useUIStore } from "@/store/ui-store";
 import { cn } from "@/lib/utils";
 
 const TYPE_META: Record<
@@ -71,12 +73,37 @@ function timeAgo(iso: string): string {
 }
 
 /**
+ * Safely parse a waitlist alert's meta payload into a deep-link descriptor.
+ * Returns null for old notifications (meta null) or malformed JSON — those
+ * rows simply render without the inline action.
+ */
+function parseWaitlistMeta(raw: string | null): WaitlistAlertMeta | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<WaitlistAlertMeta>;
+    if (
+      typeof parsed.serviceId === "string" &&
+      typeof parsed.providerId === "string" &&
+      typeof parsed.startAt === "string" &&
+      typeof parsed.endAt === "string"
+    ) {
+      return parsed as WaitlistAlertMeta;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Header bell — the mock email outbox's inbox view. Live: new notifications
  * arrive over the realtime hub (badge bump + toast) without polling.
  */
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [marking, setMarking] = useState(false);
+  const nav = useUIStore((s) => s.nav);
+  const openBooking = useUIStore((s) => s.openBooking);
 
   const { data, loading, reload } = useApiQuery<{ items: NotificationDTO[]; unread: number }>(
     "/api/notifications?limit=20",
@@ -183,6 +210,10 @@ export function NotificationBell() {
                   ring: "bg-muted text-muted-foreground",
                 };
                 const Icon = meta.icon;
+                const waitlistMeta =
+                  n.type === "waitlist_opened"
+                    ? parseWaitlistMeta(n.meta)
+                    : null;
                 return (
                   <li
                     key={n.id}
@@ -231,6 +262,26 @@ export function NotificationBell() {
                       <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
                         {n.body}
                       </p>
+                      {waitlistMeta && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-1.5 h-7 gap-1.5 border-violet-500/40 px-2.5 text-xs text-violet-700 hover:bg-violet-500/10 hover:text-violet-700 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10 dark:hover:text-violet-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void markOneRead(n.id);
+                            setOpen(false);
+                            nav("browse");
+                            openBooking(waitlistMeta.serviceId, {
+                              providerId: waitlistMeta.providerId,
+                              date: waitlistMeta.startAt.slice(0, 10),
+                            });
+                          }}
+                        >
+                          <CalendarPlus className="size-3" />
+                          Book it
+                        </Button>
+                      )}
                       <p className="mt-1 text-[11px] text-muted-foreground/70">
                         {timeAgo(n.createdAt)}
                       </p>

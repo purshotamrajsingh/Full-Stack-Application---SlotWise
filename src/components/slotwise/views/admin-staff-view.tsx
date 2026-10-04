@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, Mail, Pencil, Plane, Plus, Star, Trash2, UserRoundCheck } from "lucide-react";
+import { CalendarPlus, Loader2, Mail, Pencil, Plane, Plus, Star, Trash2, UserRoundCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,8 +40,9 @@ import { EmptyState } from "@/components/slotwise/empty-state";
 import { StarRating } from "@/components/slotwise/star-rating";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { apiFetch } from "@/lib/client-api";
-import { fmtDateShortUTC, fmtDateUTC, fmtTimeUTC, initials } from "@/lib/format";
+import { addDaysKey, fmtDateShortUTC, fmtDateUTC, fmtTimeUTC, initials, minutesToTime, todayKey } from "@/lib/format";
 import type { AdminTimeOffDTO } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface ProviderRow {
   id: string;
@@ -49,6 +56,8 @@ interface ProviderRow {
   reviewCount: number;
   services: { id: string; name: string; category: string; price: number; durationMin: number }[];
 }
+
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => i * 15); // 00:00–23:45 in 15-min steps
 
 export function AdminStaffView() {
   const { data, loading, error, reload } = useApiQuery<{ items: ProviderRow[] }>(
@@ -239,7 +248,7 @@ export function AdminStaffView() {
       )}
 
       {/* Upcoming closures across the whole team */}
-      <TimeOffOverview onChanged={reload} />
+      <TimeOffOverview providers={providers} onChanged={reload} />
 
       {/* Create dialog */}
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -443,11 +452,18 @@ function fmtTimeOffWindow(startISO: string, endISO: string): string {
   return `${fmtDateShortUTC(startISO)} ${fmtTimeUTC(startISO)} – ${fmtDateShortUTC(endISO)} ${fmtTimeUTC(endISO)}`;
 }
 
-/** Admin-wide overview of upcoming time off, with delete (closure lift). */
-function TimeOffOverview({ onChanged }: { onChanged: () => void }) {
+/** Admin-wide overview of upcoming time off — add closures, delete (closure lift). */
+function TimeOffOverview({
+  providers,
+  onChanged,
+}: {
+  providers: ProviderRow[];
+  onChanged: () => void;
+}) {
   const { data, loading, reload } = useApiQuery<{ items: AdminTimeOffDTO[] }>(
     "/api/admin/time-off",
   );
+  const [adding, setAdding] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminTimeOffDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const items = data?.items ?? [];
@@ -479,15 +495,30 @@ function TimeOffOverview({ onChanged }: { onChanged: () => void }) {
             <Plane className="size-4 text-amber-600 dark:text-amber-400" />
             Upcoming closures & time off
           </CardTitle>
-          {items.length > 0 && (
-            <Badge variant="secondary" className="font-normal">
-              {items.length} window{items.length === 1 ? "" : "s"}
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {items.length > 0 && (
+              <Badge variant="secondary" className="font-normal">
+                {items.length} window{items.length === 1 ? "" : "s"}
+              </Badge>
+            )}
+            <Button
+              size="sm"
+              onClick={() => setAdding(true)}
+              disabled={providers.length === 0}
+              title={
+                providers.length === 0
+                  ? "Add a staff provider first"
+                  : "Block a provider's calendar"
+              }
+            >
+              <CalendarPlus className="size-4" />
+              Add closure
+            </Button>
+          </div>
         </div>
         <CardDescription>
-          Every provider's blocked days in one view — remove a window to reopen
-          those slots instantly.
+          Every provider's blocked days in one view — block days for any team
+          member, or remove a window to reopen those slots instantly.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-4 pt-4">
@@ -500,7 +531,8 @@ function TimeOffOverview({ onChanged }: { onChanged: () => void }) {
         ) : items.length === 0 ? (
           <p className="flex items-center gap-2 py-6 text-center text-sm text-muted-foreground">
             <Plane className="size-4 shrink-0 opacity-60" />
-            No upcoming time off — the whole team is at work.
+            No upcoming time off — the whole team is at work. Add a closure to
+            block a holiday, training day or sick day.
           </p>
         ) : (
           <ul className="list-row-hover max-h-96 divide-y overflow-y-auto scrollbar-slim">
@@ -573,6 +605,286 @@ function TimeOffOverview({ onChanged }: { onChanged: () => void }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AddClosureDialog
+        open={adding}
+        onOpenChange={setAdding}
+        providers={providers}
+        onCreated={(notified) => {
+          reload();
+          setAdding(false);
+          onChanged();
+          toast.success("Closure added.", {
+            description:
+              notified > 0
+                ? `${notified} customer${notified === 1 ? "" : "s"} with bookings inside the window ${notified === 1 ? "was" : "were"} notified.`
+                : "No existing bookings are affected.",
+          });
+        }}
+      />
     </Card>
+  );
+}
+
+/**
+ * Admin "Add a closure" dialog — blocks any provider's calendar for full
+ * days, a date range or part of one day, mirroring the provider-facing
+ * AddTimeOffDialog patterns (15-min time steps, Full day/Partial toggle).
+ */
+function AddClosureDialog({
+  open,
+  onOpenChange,
+  providers,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  providers: ProviderRow[];
+  onCreated: (notified: number) => void;
+}) {
+  const [providerId, setProviderId] = useState("");
+  const [date, setDate] = useState(todayKey());
+  const [endDate, setEndDate] = useState("");
+  const [partial, setPartial] = useState(false);
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("13:00");
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Derived (not effect-set) selection: falls back to the first provider while
+  // the staff list loads or changes, so the dialog always has a valid target.
+  const selected =
+    providers.find((p) => p.id === providerId) ?? providers[0] ?? null;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected) {
+      toast.error("There is no provider to block yet — add staff first.");
+      return;
+    }
+    if (!date) {
+      toast.error("Pick the first day to block.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await apiFetch<{ notified: number }>(
+        `/api/providers/me/time-off?providerId=${selected.id}`,
+        {
+          method: "POST",
+          body: {
+            date,
+            ...(endDate && !partial ? { endDate } : {}),
+            ...(partial ? { startTime, endTime } : {}),
+            ...(reason.trim() ? { reason: reason.trim() } : {}),
+          },
+        },
+      );
+      // Reset for the next closure; keep the provider for repeat blocks.
+      setDate(todayKey());
+      setEndDate("");
+      setPartial(false);
+      setStartTime("09:00");
+      setEndTime("13:00");
+      setReason("");
+      onCreated(res.notified ?? 0);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not add the closure.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-slim sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Plane className="size-5 text-amber-600 dark:text-amber-400" />
+            Add a closure
+          </DialogTitle>
+          <DialogDescription>
+            Block a provider&apos;s calendar — holidays, training, sick days. New
+            bookings can&apos;t overlap the window; affected customers get a
+            heads-up.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="flex flex-col gap-4" onSubmit={submit}>
+          <div className="flex flex-col gap-1.5">
+            <Label>Provider</Label>
+            <Select value={selected?.id ?? ""} onValueChange={setProviderId}>
+              <SelectTrigger className="w-full" aria-label="Provider">
+                {selected ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                      {initials(selected.name)}
+                    </span>
+                    <span className="truncate font-medium">{selected.name}</span>
+                    {selected.specialty && (
+                      <span className="truncate text-xs font-normal text-muted-foreground">
+                        · {selected.specialty}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  "Select a provider"
+                )}
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                {providers.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                      {initials(p.name)}
+                    </span>
+                    <span className="truncate font-medium">{p.name}</span>
+                    <span className="ml-auto truncate pl-2 text-xs font-normal text-muted-foreground">
+                      {p.specialty || "No specialty"}
+                      {!p.isActive && " · inactive"}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="closure-date">From</Label>
+              <Input
+                id="closure-date"
+                type="date"
+                required
+                min={todayKey()}
+                value={date}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDate(v);
+                  if (endDate && endDate < v) setEndDate("");
+                }}
+              />
+            </div>
+            {!partial && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="closure-end">
+                  Until <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="closure-end"
+                  type="date"
+                  min={date}
+                  max={addDaysKey(date, 180)}
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium">Part of the day only</p>
+              <p className="text-xs text-muted-foreground">
+                e.g. a long lunch, training morning, school run
+              </p>
+            </div>
+            {/* Simple accessible toggle — two-option segmented control */}
+            <div
+              className="flex rounded-lg border bg-background p-0.5"
+              role="tablist"
+              aria-label="Block type"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!partial}
+                onClick={() => setPartial(false)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  !partial
+                    ? "bg-secondary text-secondary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Full day
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={partial}
+                onClick={() => setPartial(true)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  partial
+                    ? "bg-secondary text-secondary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Partial
+              </button>
+            </div>
+          </div>
+
+          {partial && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Block from</Label>
+                <Select value={startTime} onValueChange={setStartTime}>
+                  <SelectTrigger className="tabular-nums" aria-label="Block start">
+                    {startTime}
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    {TIME_OPTIONS.map((m) => (
+                      <SelectItem key={m} value={minutesToTime(m)} className="tabular-nums">
+                        {minutesToTime(m)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Block until</Label>
+                <Select value={endTime} onValueChange={setEndTime}>
+                  <SelectTrigger className="tabular-nums" aria-label="Block end">
+                    {endTime}
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    {TIME_OPTIONS.map((m) => (
+                      <SelectItem key={m} value={minutesToTime(m)} className="tabular-nums">
+                        {minutesToTime(m)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="closure-reason">
+              Reason <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Textarea
+              id="closure-reason"
+              placeholder="Annual leave, conference, training…"
+              maxLength={100}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="min-h-16"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="size-4 animate-spin" />}
+              Block this time
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

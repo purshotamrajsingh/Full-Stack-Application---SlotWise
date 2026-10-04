@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json({
     name: "SlotWise API",
-    version: "1.2.0",
+    version: "1.3.0",
     auth: "Bearer JWT (Authorization header) — access + refresh token pair",
     endpoints: {
       auth: [
@@ -44,6 +44,11 @@ export async function GET() {
         "GET  /api/waitlist (own watches)",
         "POST /api/waitlist (customer — watch a taken slot)",
         "DELETE /api/waitlist/:id (stop watching)",
+      ],
+      favorites: [
+        "GET  /api/favorites (customer — hearted service IDs)",
+        "POST /api/favorites (customer — heart a service)",
+        "DELETE /api/favorites/:serviceId (customer — unheart)",
       ],
       notifications: [
         "GET  /api/notifications?limit= (own inbox)",

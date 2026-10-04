@@ -14,6 +14,7 @@ import {
   Loader2,
   LogIn,
   Plane,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,8 @@ export function BookingDialog() {
   const user = useAuthStore((s) => s.user);
   const bookingServiceId = useUIStore((s) => s.bookingServiceId);
   const rescheduleBookingId = useUIStore((s) => s.rescheduleBookingId);
+  const bookingProviderId = useUIStore((s) => s.bookingProviderId);
+  const bookingDate = useUIStore((s) => s.bookingDate);
   const closeBooking = useUIStore((s) => s.closeBooking);
   const goAuth = useUIStore((s) => s.goAuth);
   const nav = useUIStore((s) => s.nav);
@@ -81,6 +84,8 @@ export function BookingDialog() {
   const [watched, setWatched] = useState<Record<string, string>>({});
   /** The slot the user had selected when someone else grabbed it. */
   const [stolen, setStolen] = useState<SlotDTO | null>(null);
+  /** Dialog was deep-linked from a waitlist alert (drives the violet chip). */
+  const [fromWaitlist, setFromWaitlist] = useState(false);
 
   // Resolve service (create) or booking (reschedule) when the dialog opens.
   useEffect(() => {
@@ -95,6 +100,7 @@ export function BookingDialog() {
     setCreatedId(null);
     setWatched({});
     setStolen(null);
+    setFromWaitlist(Boolean(bookingProviderId));
 
     if (rescheduleBookingId) {
       apiFetch<{ items: BookingDTO[] }>("/api/bookings")
@@ -111,7 +117,7 @@ export function BookingDialog() {
         })
         .catch(() => toast.error("Could not load the booking."));
     }
-  }, [open, rescheduleBookingId, closeBooking]);
+  }, [open, rescheduleBookingId, closeBooking, bookingProviderId]);
 
   useEffect(() => {
     if (!open || rescheduleBookingId) return;
@@ -124,13 +130,38 @@ export function BookingDialog() {
           return;
         }
         setService(svc);
-        if (svc.providers.length === 1) {
+        // Waitlist deep-link: jump straight to the time picker when the hint
+        // names a provider who actually delivers this service.
+        const hintedProvider =
+          bookingProviderId &&
+          svc.providers.some((p) => p.id === bookingProviderId)
+            ? bookingProviderId
+            : null;
+        setFromWaitlist(Boolean(hintedProvider));
+        if (hintedProvider) {
+          setProviderId(hintedProvider);
+          setStep(2);
+        } else if (svc.providers.length === 1) {
           setProviderId(svc.providers[0]!.id);
           setStep(2);
         }
+        // Date hint: honoured only inside the 14-day picker window (the
+        // reset effect above already fell back to today).
+        if (bookingDate) {
+          const first = todayKey();
+          const last = addDaysKey(first, DAYS_AHEAD - 1);
+          if (bookingDate >= first && bookingDate <= last) setDate(bookingDate);
+        }
       })
       .catch(() => toast.error("Could not load the service."));
-  }, [open, bookingServiceId, rescheduleBookingId, closeBooking]);
+  }, [
+    open,
+    bookingServiceId,
+    rescheduleBookingId,
+    bookingProviderId,
+    bookingDate,
+    closeBooking,
+  ]);
 
   const effectiveServiceId = rescheduleMode
     ? existing?.serviceId ?? null
@@ -407,6 +438,15 @@ export function BookingDialog() {
         {/* Step 2 — date & time */}
         {step === 2 && user && (
           <div className="flex flex-col gap-4">
+            {fromWaitlist && !rescheduleMode && (
+              <div className="flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-700 dark:text-violet-300">
+                <Sparkles className="size-3.5 shrink-0" />
+                <p className="truncate">
+                  From your waitlist — {service?.name ?? "this service"} with{" "}
+                  {chosenProvider?.name ?? "your provider"}
+                </p>
+              </div>
+            )}
             {step === 2 && providerId && !rescheduleMode && chosenProvider && (
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
                 <span className="font-medium">{chosenProvider.name}</span>
@@ -547,7 +587,7 @@ export function BookingDialog() {
                               disabled={!s.available}
                               onClick={() => setSelectedSlot(s)}
                               className={cn(
-                                "w-full rounded-md border px-2 py-2 text-sm font-medium tabular-nums transition-colors",
+                                "press w-full rounded-md border px-2 py-2 text-sm font-medium tabular-nums transition-colors",
                                 !s.available
                                   ? "cursor-not-allowed border-muted bg-muted/40 text-muted-foreground/50 line-through"
                                   : selectedSlot?.startAt === s.startAt
@@ -599,7 +639,7 @@ export function BookingDialog() {
             <Button
               disabled={!selectedSlot}
               onClick={() => setStep(3)}
-              className="w-full"
+              className="press w-full"
             >
               Continue
               <ArrowRight className="size-4" />
@@ -657,7 +697,7 @@ export function BookingDialog() {
                 <ArrowLeft className="size-4" />
                 Back
               </Button>
-              <Button className="flex-1" onClick={confirm} disabled={submitting}>
+              <Button className="press flex-1" onClick={confirm} disabled={submitting}>
                 {submitting && <Loader2 className="size-4 animate-spin" />}
                 {rescheduleMode ? "Confirm reschedule" : "Confirm booking"}
               </Button>

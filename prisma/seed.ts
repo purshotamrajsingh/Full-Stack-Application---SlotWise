@@ -39,6 +39,7 @@ async function main() {
 
   // Wipe (FK order)
   await db.waitlist.deleteMany();
+  await db.favorite.deleteMany();
   await db.review.deleteMany();
   await db.notification.deleteMany();
   await db.timeOff.deleteMany();
@@ -152,12 +153,13 @@ async function main() {
     { name: "Fatima Zahra", email: "fatima@slotwise.test" },
   ];
   const customers: { id: string }[] = [];
+  const customerByEmail: Record<string, { id: string }> = {};
   for (const c of customerSpecs) {
-    customers.push(
-      await db.user.create({
-        data: { name: c.name, email: c.email, passwordHash, role: "CUSTOMER" },
-      }),
-    );
+    const created = await db.user.create({
+      data: { name: c.name, email: c.email, passwordHash, role: "CUSTOMER" },
+    });
+    customers.push(created);
+    customerByEmail[c.email] = created;
   }
 
   // ── Services ─────────────────────────────────────────────────────────────
@@ -352,6 +354,32 @@ async function main() {
   }
   console.log(`Created ${waitlistCount} waitlist entries.`);
 
+  // ── Favorites (customer shortlists) ─────────────────────────────────
+  const favoriteSpecs = [
+    {
+      email: "sam@slotwise.test",
+      services: ["Deep Tissue Massage", "Sports Injury Assessment", "Signature Haircut"],
+    },
+    {
+      email: "fatima@slotwise.test",
+      services: ["Hygiene & Scale Polish", "Whitening Consultation"],
+    },
+  ];
+  let favoriteCount = 0;
+  for (const spec of favoriteSpecs) {
+    const customer = customerByEmail[spec.email];
+    if (!customer) continue;
+    for (const name of spec.services) {
+      const svc = services[name];
+      if (!svc) continue;
+      await db.favorite.create({
+        data: { userId: customer.id, serviceId: svc.id },
+      });
+      favoriteCount++;
+    }
+  }
+  console.log(`Created ${favoriteCount} favorites.`);
+
   const counts = {
     users: await db.user.count(),
     providers: await db.provider.count(),
@@ -359,6 +387,7 @@ async function main() {
     bookings: await db.booking.count(),
     reviews: await db.review.count(),
     waitlist: await db.waitlist.count(),
+    favorites: await db.favorite.count(),
   };
   console.log("Seed complete:", counts, "(admin:", admin.email + ")");
 }
