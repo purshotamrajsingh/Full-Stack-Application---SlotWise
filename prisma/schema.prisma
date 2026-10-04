@@ -1,0 +1,120 @@
+// SlotWise — Prisma schema (SQLite)
+// Roles: ADMIN | PROVIDER | CUSTOMER  (string + Zod validation, since Prisma enums are not supported on SQLite)
+// BookingStatus: PENDING | CONFIRMED | COMPLETED | CANCELLED | NO_SHOW
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("CUSTOMER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  provider Provider?
+  bookings Booking[] @relation("CustomerBookings")
+  reviews  Review[]
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  description String   @default("")
+  durationMin Int
+  price       Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  providers ProviderService[]
+  bookings  Booking[]
+}
+
+model Provider {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bio        String @default("")
+  specialty  String @default("")
+  isActive   Boolean @default(true)
+
+  availability Availability[]
+  services     ProviderService[]
+  bookings     Booking[]
+}
+
+model ProviderService {
+  providerId String
+  serviceId  String
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, serviceId])
+}
+
+// Weekly availability windows. weekday = JS Date.getDay() (0=Sunday .. 6=Saturday).
+// startMin/endMin = minutes from midnight, business timezone = UTC.
+model Availability {
+  id         String @id @default(cuid())
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  weekday  Int
+  startMin Int
+  endMin   Int
+
+  @@unique([providerId, weekday, startMin])
+}
+
+model Booking {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   User     @relation("CustomerBookings", fields: [customerId], references: [id])
+
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id])
+
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id])
+
+  startAt DateTime
+  endAt   DateTime
+
+  status String @default("PENDING")
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  review Review?
+
+  @@index([providerId, startAt])
+  @@index([customerId, startAt])
+  @@index([status])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User     @relation(fields: [authorId], references: [id])
+
+  rating  Int
+  comment String?
+
+  createdAt DateTime @default(now())
+}

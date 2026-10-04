@@ -1,0 +1,304 @@
+# SlotWise
+
+**Bookings & analytics for small service businesses** — clinics, salons, tutors and physiotherapists.
+
+SlotWise replaces the WhatsApp-roulette-and-paper-diary workflow with online booking, staff
+schedules and a live performance dashboard. It is a full-stack web application built for the
+Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 40 credits).
+
+> **Core guarantee:** double-bookings are impossible by design — the overlap check and the
+> INSERT run inside a single serialized database transaction (see
+> [Double-booking prevention](#double-booking-prevention)).
+
+---
+
+## Table of contents
+
+1. [Feature overview](#feature-overview)
+2. [Architecture](#architecture)
+3. [Technology decisions (incl. why Prisma instead of Django ORM)](#technology-decisions)
+4. [Getting started](#getting-started)
+5. [Demo accounts](#demo-accounts)
+6. [Data models](#data-models)
+7. [API reference](#api-reference)
+8. [Double-booking prevention](#double-booking-prevention)
+9. [Security model](#security-model)
+10. [Design decisions & trade-offs](#design-decisions--trade-offs)
+
+---
+
+## Feature overview
+
+| Area | What it does |
+| --- | --- |
+| **Authentication** | Register / login, JWT **access + refresh** tokens (30 min / 30 d, rotation), bcrypt password hashing, single-flight silent refresh on the client |
+| **Role-based access** | `ADMIN` / `PROVIDER` / `CUSTOMER` enforced by a server-side guard on **every** protected route; SPA view guards on the client |
+| **Search** | Full-text across service name, category, description **and provider name**, debounced as-you-type |
+| **Filtering** | Category chips, price brackets, provider, status, date range (`from`/`to`), upcoming-only |
+| **Sorting** | Price ↑/↓, rating, **next available slot**, duration, popularity, name |
+| **3-click booking** | Provider → slot grid → confirm. Slot grid is 15-min aligned, respects availability windows, lead time (60 min) and existing bookings; booked slots are greyed out |
+| **Reschedule / cancel** | Customers reschedule or cancel their own pending/confirmed bookings with the same overlap guard |
+| **Provider portal** | Today's diary, one-click confirm / complete / no-show / cancel with server-enforced status transitions, weekly availability editor with overlap validation |
+| **Admin dashboard** | KPIs (revenue, expected revenue, no-show rate, avg rating, active customers), bookings-per-day area chart, revenue by service, **peak hours**, status mix donut, top providers, revenue by category — all live |
+| **CSV export** | Authenticated download of all bookings in a chosen range (RFC-4180 escaping) |
+| **Reviews** | Customers rate completed bookings 1–5; ratings feed search ranking and provider stats |
+| **Responsive UI** | Mobile-first (tested at 375 / 768 / 1280 px), dark mode, sticky footer, toast feedback, skeleton loaders |
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client["Browser (React 19 SPA)"]
+        UI["AppShell + role views\n(landing · browse · auth ·\nmy-bookings · provider · admin)"]
+        Stores["Zustand stores\nauth (JWT+refresh) · ui (view/intent)"]
+        Fetcher["apiFetch\nauto-refresh + retry"]
+    end
+
+    subgraph Server["Next.js 16 (Node runtime)"]
+        Routes["/api/* route handlers\n(Node REST layer)"]
+        Guard["Auth + RBAC guard\n(jose JWT · bcrypt)"]
+        Zod["Zod validation"]
+        SlotEngine["Slot engine\n15-min grid · windows · lead time"]
+        TxnGuard["Transactional overlap guard"]
+        Analytics["Analytics aggregation"]
+    end
+
+    subgraph Data["Data layer"]
+        Prisma["Prisma ORM\n(migrations · typesafe queries)"]
+        SQLite[("SQLite\nfile: db/custom.db")]
+    end
+
+    UI --> Stores --> Fetcher -->|HTTPS/JSON + Bearer| Routes
+    Routes --> Guard --> Zod --> SlotEngine
+    SlotEngine --> TxnGuard --> Prisma --> SQLite
+    Routes --> Analytics --> Prisma
+```
+
+**Mapping to the classic three tiers:**
+
+| Brief requirement | SlotWise implementation |
+| --- | --- |
+| React front-end served by a Node server | Next.js 16 App Router: React 19 SPA on `/`, Node route handlers under `/api/*` (the Node.js/Express equivalent — same REST contract, same middleware pattern, one process) |
+| State management | Zustand `auth` + `ui` stores (the Context-API role, with less boilerplate) |
+| ORM + database | Prisma ORM + SQLite (see [Technology decisions](#technology-decisions)) |
+| Advanced features | Auth/RBAC, search/filter/sort, dashboard/reporting, CSV export, double-booking prevention |
+
+---
+
+## Technology decisions
+
+**PostgreSQL vs MongoDB** (LO2 comparison): appointment data is inherently relational
+(users ↔ providers ↔ services ↔ bookings ↔ reviews) with integrity constraints (unique
+provider-service links, no overlapping ranges, FK cascades) and aggregate-heavy reporting
+(group-by-day, by-service, by-provider). A relational database is the right tool; a document
+store would push join/consistency logic into application code. The sandbox provides SQLite,
+which carries the same relational guarantees (ACID, FKs, serializable writes) at zero-ops cost;
+the schema is portable to PostgreSQL unchanged for deployment.
+
+**Why Prisma ORM instead of Django ORM** (the honest note): the brief lists both a *Node.js
+server* and *Django ORM*. Django ORM is a Python library and cannot run inside a Node process —
+the two requirements are technically incompatible as written. Options were (a) split into a
+Node API + separate Django service (doubles deployment surface, adds network hop for every
+query) or (b) keep one Node stack with a Node-native ORM. SlotWise takes **(b)** with
+**Prisma**: typesafe schema-first models, migrations, and the transaction primitives needed for
+the double-booking guarantee, all in the same language and process as the API layer. This keeps
+the artefact simpler, faster and fully type-safe end-to-end. *(Confirm this reading with the
+unit leader, Dr Sermet Mir, before submission — this is the documented fallback.)*
+
+**Front end:** React 19 + Tailwind CSS 4 + shadcn/ui (New York) + Recharts, with Zustand for
+auth/booking state. JWT pair persisted in `localStorage`, silent refresh with a single-flight
+promise so concurrent 401s share one refresh round-trip.
+
+---
+
+## Getting started
+
+**Prerequisites:** [Node.js ≥ 20](https://nodejs.org) or [Bun](https://bun.sh) ≥ 1.1.
+
+```bash
+# 1. install dependencies
+bun install        # or: npm install
+
+# 2. configure environment (already present in this sandbox)
+#    .env
+#    DATABASE_URL="file:./db/custom.db"
+#    JWT_SECRET="<random hex>"
+#    JWT_REFRESH_SECRET="<random hex>"
+
+# 3. create the database schema
+bun run db:push    # prisma db push
+
+# 4. seed demo data (13 users, 11 services, ~520 bookings, ~180 reviews)
+bun run db:seed
+
+# 5. start the dev server
+bun run dev        # http://localhost:3000
+```
+
+Other scripts: `bun run lint` (ESLint), `bun run db:generate`, `bun run db:migrate`,
+`bun run db:reset`.
+
+---
+
+## Demo accounts
+
+All demo accounts share the password **`Password#123`**.
+
+| Role | Email | What to try |
+| --- | --- | --- |
+| Admin (owner) | `admin@slotwise.test` | Dashboard → charts, CSV export, Services CRUD, Staff, Bookings |
+| Provider | `priya@slotwise.test` | Today's diary, confirm/complete, availability editor |
+| Provider | `marco@slotwise.test` | Salon diary (Thu–Sat) |
+| Customer | `sam@slotwise.test` | Search → 3-click book → reschedule/cancel/review |
+
+Public registration always creates a `CUSTOMER`; staff accounts are provisioned by the admin —
+self-service role escalation is impossible.
+
+---
+
+## Data models
+
+```
+User        id, name, email (unique), passwordHash, role[ADMIN|PROVIDER|CUSTOMER], timestamps
+Provider    id, userId → User (1:1), bio, specialty, isActive
+Service     id, name, category, description, durationMin, price, isActive, timestamps
+ProviderService  (providerId, serviceId) composite PK — M:N link
+Availability     id, providerId → Provider, weekday (0=Sun…6=Sat), startMin, endMin
+                 unique (providerId, weekday, startMin)
+Booking     id, customerId → User, providerId → Provider, serviceId → Service,
+            startAt, endAt, status[PENDING|CONFIRMED|COMPLETED|CANCELLED|NO_SHOW],
+            notes, timestamps
+            index (providerId, startAt) — the double-booking scan path
+Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment
+```
+
+Prisma schema: [`prisma/schema.prisma`](prisma/schema.prisma) · Seed: [`prisma/seed.ts`](prisma/seed.ts)
+
+*(Roles and statuses are strings validated by Zod rather than Prisma enums, because Prisma does
+not support enums on SQLite.)*
+
+---
+
+## API reference
+
+All endpoints are JSON over HTTPS, authenticated via `Authorization: Bearer <accessToken>`.
+Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
+
+### Auth
+
+| Method | Path | Access | Body / Query |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | public | `{ name, email, password }` → tokens + user (role fixed to CUSTOMER) |
+| POST | `/auth/login` | public | `{ email, password }` → tokens + user |
+| POST | `/auth/refresh` | public | `{ refreshToken }` → rotated token pair |
+| POST | `/auth/logout` | public | stateless — client discards tokens |
+| GET | `/auth/me` | any | → current user profile |
+
+### Services
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/services` | public | `q, category, minPrice, maxPrice, provider, sort` (`price_asc\|price_desc\|rating\|next_available\|duration\|popular\|name`), `includeInactive=1` (admin) |
+| POST | `/services` | admin | `{ name, category, description?, durationMin, price, isActive?, providerIds? }` |
+| PUT | `/services/:id` | admin | partial update + provider re-link |
+| DELETE | `/services/:id` | admin | soft-deletes (deactivates) when booking history exists |
+
+### Providers & slots
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/providers` | public | `q`, `all=1` (admin) |
+| POST | `/providers` | admin | provisions a PROVIDER user (name, email, password, bio, specialty, serviceIds) |
+| GET | `/providers/:id` | public | profile + services + rating |
+| PATCH | `/providers/:id` | admin | bio / specialty / isActive / service links |
+| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags |
+| GET | `/providers/me/availability` | provider/admin | weekly windows |
+| PUT | `/providers/me/availability` | provider/admin | full replace; rejects overlapping windows |
+
+### Bookings
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/bookings` | any (role-scoped) | customers→own, providers→own diary, admin→all; `status, from, to, q, upcoming, sort` |
+| POST | `/bookings` | customer | `{ serviceId, providerId, startAt, notes? }` — transactional overlap guard → `409 SLOT_TAKEN` |
+| PATCH | `/bookings/:id` | customer (own) | reschedule `{ startAt }` — same guard, excludes itself |
+| DELETE | `/bookings/:id` | owner/provider/admin | cancel (PENDING/CONFIRMED only) |
+| PATCH | `/bookings/:id/status` | provider (own) / admin | enforced transitions: PENDING→CONFIRMED\|CANCELLED, CONFIRMED→COMPLETED\|NO_SHOW\|CANCELLED |
+| POST | `/bookings/:id/review` | customer (own) | COMPLETED only, once; `{ rating 1-5, comment? }` |
+
+### Dashboard & misc
+
+| Method | Path | Access | Notes |
+| --- | --- | --- | --- |
+| GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs + all chart series |
+| GET | `/dashboard/export` | admin | `range` → CSV download |
+| GET | `/categories` | public | distinct categories + counts |
+| GET | `/health` | public | liveness probe |
+| GET | `/api` | public | machine-readable endpoint index |
+
+---
+
+## Double-booking prevention
+
+The standout technical feature. Bookings are stored as `[startAt, endAt)` ranges per provider.
+Creating (or rescheduling) a booking runs **one interactive Prisma transaction**:
+
+```ts
+await db.$transaction(async (tx) => {
+  // …validate service/provider/availability/lead time…
+  const busy = await tx.booking.findMany({
+    where: {
+      providerId,
+      status: { in: ["PENDING", "CONFIRMED"] },
+      startAt: { lt: dayEnd }, endAt: { gt: dayStart },
+    },
+  });
+  if (busy.some((b) => b.startAt < endAt && b.endAt > startAt)) {
+    throw new HttpError(409, "SLOT_TAKEN", "This slot has just been booked.");
+  }
+  return tx.booking.create({ /* … */ });
+});
+```
+
+The overlap check (`a.start < b.end && a.end > b.start`) and the INSERT execute atomically, and
+SQLite serialises writers (single-writer lock), so two concurrent requests can never both pass
+the check — the second writer receives `409 SLOT_TAKEN`. This is the SQLite-portable equivalent
+of a PostgreSQL `EXCLUDE` constraint on a `tstzrange` overlap, which would be the
+production-grade expression on Postgres.
+
+Additional invariants enforced server-side: the slot must fit **entirely inside one weekly
+availability window**, respect a 60-minute lead time, and the provider must actually be linked
+to the service.
+
+---
+
+## Security model
+
+- **Passwords**: bcrypt (cost 10); hashes only, never returned by any endpoint.
+- **JWT**: HS256 via `jose`; 30-minute access tokens + 30-day refresh tokens with **rotation**
+  on every refresh; separate secrets; type-claim prevents token-kind confusion.
+- **RBAC**: `requireSession(req, roles)` guard on every protected route; role always re-read
+  from the database (revoking a role takes effect immediately, not at token expiry).
+- **Input validation**: Zod schemas on every mutating endpoint.
+- **Authorization**: booking ownership checks (customer can only touch *own* bookings;
+  provider only *own* diary rows); public registration can't grant roles.
+- **SQL injection**: impossible by construction (Prisma parameterised queries).
+
+---
+
+## Design decisions & trade-offs
+
+- **Single-page app on `/`** with client-side view switching — the sandbox exposes one route;
+  a hash/router-based split adds no value here and the store-driven navigation keeps deep
+  intents (e.g. "sign in to book") resumable.
+- **Business timezone = UTC** (all times rendered as UTC wall-clock). A production build would
+  store per-business timezones with `timestamptz`; the simplification removes DST ambiguity in
+  the demo without affecting the booking logic.
+- **Search filtering** partly in SQL (category, price, text) and partly in JS (provider-name
+  match, next-available sort) — at demo scale (≤ hundreds of rows) this keeps one query shape
+  for all filters; at production scale the provider-name search would move to a join/FTS.
+- **Soft delete for services** with booking history so analytics stay historically accurate.
+- **Status transitions are a server-side state machine** — the UI offers only legal actions,
+  but the API enforces the same rules regardless of client.
