@@ -23,6 +23,8 @@ export interface UserDTO {
   email: string;
   role: Role;
   providerId?: string | null;
+  /** IANA display timezone (customers; staff views always render UTC). */
+  timezone?: string;
   createdAt: string;
 }
 

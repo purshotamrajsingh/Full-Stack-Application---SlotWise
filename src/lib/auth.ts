@@ -136,6 +136,7 @@ export function toUserDTO(user: {
   name: string;
   email: string;
   role: string;
+  timezone?: string | null;
   createdAt: Date;
   provider?: { id: string } | null;
 }): import("@/lib/types").UserDTO {
@@ -145,6 +146,7 @@ export function toUserDTO(user: {
     email: user.email,
     role: user.role as Role,
     providerId: user.provider?.id ?? null,
+    timezone: user.timezone ?? "UTC",
     createdAt: user.createdAt.toISOString(),
   };
 }

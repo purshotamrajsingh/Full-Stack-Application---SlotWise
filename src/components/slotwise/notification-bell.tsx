@@ -11,6 +11,7 @@ import {
   CircleAlert,
   Clock3,
   Inbox,
+  Megaphone,
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -61,6 +62,11 @@ const TYPE_META: Record<
     icon: Sparkles,
     ring: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
     chime: toast.success,
+  },
+  broadcast: {
+    icon: Megaphone,
+    ring: "bg-primary/15 text-primary",
+    chime: toast.info,
   },
 };
 

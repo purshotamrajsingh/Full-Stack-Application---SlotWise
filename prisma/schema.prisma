@@ -17,6 +17,8 @@ model User {
   email        String   @unique
   passwordHash String
   role         String   @default("CUSTOMER")
+  /** IANA display timezone for customers (staff views stay business-UTC). */
+  timezone     String   @default("UTC")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

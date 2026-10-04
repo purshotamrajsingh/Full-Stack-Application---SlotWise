@@ -8,6 +8,8 @@ import {
   Banknote,
   CalendarCheck2,
   Download,
+  Loader2,
+  Megaphone,
   Star,
   TrendingUp,
   UserRound,
@@ -32,6 +34,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -54,7 +67,7 @@ import { AdminBookingsView } from "@/components/slotwise/views/admin-bookings-vi
 import { useUIStore } from "@/store/ui-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime } from "@/hooks/use-realtime";
-import { downloadCsv } from "@/lib/client-api";
+import { apiFetch, downloadCsv } from "@/lib/client-api";
 import type { DashboardDTO } from "@/lib/types";
 import { fmtDateShortUTC, fmtDateTimeUTC, fmtMoney, fmtTimeUTC, initials, statusMeta } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -130,6 +143,7 @@ function OverviewSection() {
   const [range, setRange] = useState("30");
   const [exporting, setExporting] = useState(false);
   const [livePing, setLivePing] = useState<string | null>(null);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const { data, loading, error, reload } = useApiQuery<DashboardDTO>(
     `/api/dashboard/summary?range=${range}`,
@@ -210,11 +224,22 @@ function OverviewSection() {
             </span>
           )}
         </div>
-        <Button variant="outline" onClick={exportCsv} disabled={exporting || loading}>
-          <Download className="size-4" />
-          Export CSV
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setBroadcastOpen(true)}>
+            <Megaphone className="size-4" />
+            Broadcast
+          </Button>
+          <Button variant="outline" onClick={exportCsv} disabled={exporting || loading}>
+            <Download className="size-4" />
+            Export CSV
+          </Button>
+        </div>
       </div>
+
+      <BroadcastDialog
+        open={broadcastOpen}
+        onOpenChange={setBroadcastOpen}
+      />
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -727,5 +752,137 @@ function StatusDonut({ data }: { data: DashboardDTO["statusMix"] }) {
         <span className="text-xs text-muted-foreground">total</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Admin broadcast composer — one message, every bell. Audience choices:
+ * everyone, customers only, or just customers with upcoming bookings.
+ * Each recipient gets their own outbox row + realtime push.
+ */
+function BroadcastDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [audience, setAudience] = useState<"ALL" | "CUSTOMERS" | "UPCOMING">("CUSTOMERS");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const audienceHint: Record<string, string> = {
+    ALL: "Every account — owners, staff and customers.",
+    CUSTOMERS: "Customer accounts only — the usual choice for promos and notices.",
+    UPCOMING: "Only customers with a pending or confirmed future booking.",
+  };
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (title.trim().length < 3 || body.trim().length < 5) {
+      toast.error("Give the message a title (3+ chars) and a body (5+ chars).");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await apiFetch<{ sent: number }>("/api/admin/broadcast", {
+        method: "POST",
+        body: { title: title.trim(), body: body.trim(), audience },
+      });
+      toast.success("Broadcast sent.", {
+        description: `${res.sent} recipient${res.sent === 1 ? "" : "s"} got the message in their bell.`,
+      });
+      setTitle("");
+      setBody("");
+      setAudience("CUSTOMERS");
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send the broadcast.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Megaphone className="size-5 text-primary" />
+            Send a broadcast
+          </DialogTitle>
+          <DialogDescription>
+            Lands instantly in every recipient&apos;s notification bell —
+            and in the mock email outbox.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="flex flex-col gap-4" onSubmit={send}>
+          <div className="flex flex-col gap-1.5">
+            <Label>Audience</Label>
+            <Select value={audience} onValueChange={(v) => setAudience(v as typeof audience)}>
+              <SelectTrigger aria-label="Broadcast audience">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Everyone</SelectItem>
+                <SelectItem value="CUSTOMERS">All customers</SelectItem>
+                <SelectItem value="UPCOMING">Customers with upcoming bookings</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{audienceHint[audience]}</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="bc-title">Title</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {title.length}/80
+              </span>
+            </div>
+            <Input
+              id="bc-title"
+              required
+              minLength={3}
+              maxLength={80}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="October offer — 20% off hygiene visits"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="bc-body">Message</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {body.length}/500
+              </span>
+            </div>
+            <Textarea
+              id="bc-body"
+              required
+              minLength={5}
+              maxLength={500}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Mention the promo, when it runs and how to book…"
+              className="min-h-28"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" className="press" disabled={sending}>
+              {sending && <Loader2 className="size-4 animate-spin" />}
+              <Megaphone className="size-4" />
+              Send broadcast
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

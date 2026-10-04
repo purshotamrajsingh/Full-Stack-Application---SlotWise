@@ -1,6 +1,14 @@
 // Pure formatting helpers — safe on both client and server.
-// SlotWise keeps all appointment math in UTC ("business timezone = UTC"),
-// so every formatter below intentionally renders UTC wall-clock values.
+// SlotWise keeps all appointment MATH in UTC ("business timezone = UTC");
+// display formatting additionally honours a per-user display timezone.
+// The module-level display tz defaults to "UTC" and is ONLY mutated on the
+// client (see auth-store hydration + the timezone settings dialog) from a
+// customer's profile — staff views therefore always render business-UTC.
+// Server code must use the explicit-tz variants (fmtDateTz/fmtTimeTz) when
+// it needs recipient-local copy; the no-arg formatters on the server see the
+// untouched default.
+
+import { isValidTimezone, tzShortLabel } from "@/lib/tz";
 
 export const WEEKDAY_LABELS = [
   "Sunday",
@@ -16,8 +24,68 @@ export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const DAY_MS = 86_400_000;
 
+let displayTz = "UTC";
+
+/** Client-only: set the display timezone from the signed-in user's profile. */
+export function setDisplayTimezone(tz: string | null | undefined): void {
+  displayTz = tz && isValidTimezone(tz) ? tz : "UTC";
+}
+
+/** The active display timezone ("UTC" on the server and for staff). */
+export function activeTimezone(): string {
+  return displayTz;
+}
+
+/** Short label for the active display timezone ("UTC", "UTC+5", …). */
+export function tzSuffix(): string {
+  return tzShortLabel(displayTz);
+}
+
+interface LocalParts {
+  year: number;
+  monthShort: string;
+  day: number;
+  hour: number;
+  minute: number;
+  weekdayIdx: number;
+}
+
+function localParts(iso: string | Date, tz: string): LocalParts {
+  const dtf = new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hourCycle: "h23",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const parts = dtf.formatToParts(iso instanceof Date ? iso : new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const weekdayIdx = Math.max(0, WEEKDAY_SHORT.indexOf(get("weekday")));
+  return {
+    year: Number(get("year")),
+    monthShort: get("month"),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    weekdayIdx,
+  };
+}
+
+const pad2 = (n: number) => n.toString().padStart(2, "0");
+
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Local calendar day key ("YYYY-MM-DD") of NOW in the display timezone. */
 export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  const p = localParts(new Date(), displayTz);
+  const monthIdx = Math.max(0, MONTH_SHORT.indexOf(p.monthShort)) + 1;
+  return `${p.year}-${pad2(monthIdx)}-${pad2(p.day)}`;
 }
 
 export function addDaysKey(key: string, days: number): string {
@@ -25,31 +93,58 @@ export function addDaysKey(key: string, days: number): string {
   return new Date(d.getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** "Mon, 4 Oct 2026" in the display timezone. */
 export function fmtDateUTC(iso: string): string {
-  const d = new Date(iso);
-  return `${WEEKDAY_SHORT[d.getUTCDay()]}, ${d.getUTCDate()} ${d.toLocaleString(
-    "en-GB",
-    { month: "short", timeZone: "UTC" },
-  )} ${d.getUTCFullYear()}`;
+  const p = localParts(iso, displayTz);
+  return `${WEEKDAY_SHORT[p.weekdayIdx]}, ${p.day} ${p.monthShort} ${p.year}`;
 }
 
+/** Explicit-tz variant for server-side recipient-local copy. */
+export function fmtDateTz(iso: string, tz: string): string {
+  const p = localParts(iso, isValidTimezone(tz) ? tz : "UTC");
+  return `${WEEKDAY_SHORT[p.weekdayIdx]}, ${p.day} ${p.monthShort} ${p.year}`;
+}
+
+/** "4 Oct" in the display timezone. */
 export function fmtDateShortUTC(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getUTCDate()} ${d.toLocaleString("en-GB", {
-    month: "short",
-    timeZone: "UTC",
-  })}`;
+  const p = localParts(iso, displayTz);
+  return `${p.day} ${p.monthShort}`;
 }
 
+/** "14:30" in the display timezone. */
 export function fmtTimeUTC(iso: string): string {
-  const d = new Date(iso);
-  const h = d.getUTCHours();
-  const m = d.getUTCMinutes().toString().padStart(2, "0");
-  return `${h.toString().padStart(2, "0")}:${m}`;
+  const p = localParts(iso, displayTz);
+  return `${pad2(p.hour)}:${pad2(p.minute)}`;
+}
+
+/** Explicit-tz variant for server-side recipient-local copy. */
+export function fmtTimeTz(iso: string, tz: string): string {
+  const p = localParts(iso, isValidTimezone(tz) ? tz : "UTC");
+  return `${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
 export function fmtDateTimeUTC(iso: string): string {
   return `${fmtDateUTC(iso)} · ${fmtTimeUTC(iso)}`;
+}
+
+/** Local hour of the day (0–23) in the display timezone — slot grouping. */
+export function localHour(iso: string): number {
+  return localParts(iso, displayTz).hour;
+}
+
+/** Local day-of-week index (0=Sun) in the display timezone. */
+export function localWeekdayIdx(iso: string | Date): number {
+  return localParts(iso instanceof Date ? iso.toISOString() : iso, displayTz).weekdayIdx;
+}
+
+/** Local day-of-month in the display timezone. */
+export function localDayOfMonth(iso: string | Date): number {
+  return localParts(iso instanceof Date ? iso.toISOString() : iso, displayTz).day;
+}
+
+/** Local short month name in the display timezone. */
+export function localMonthShort(iso: string | Date): string {
+  return localParts(iso instanceof Date ? iso.toISOString() : iso, displayTz).monthShort;
 }
 
 export function fmtDuration(min: number): string {

@@ -14,6 +14,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ServiceCard } from "@/components/slotwise/service-card";
 import { EmptyState } from "@/components/slotwise/empty-state";
+import { RecommendationStrip } from "@/components/slotwise/recommendation-strip";
 import { useUIStore } from "@/store/ui-store";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery, useDebounced } from "@/hooks/use-api-query";
@@ -134,6 +135,9 @@ export function BrowseView() {
           Search by service, provider or category — filters apply instantly.
         </p>
       </div>
+
+      {/* Personalised / popular shortlist */}
+      <RecommendationStrip />
 
       {/* Filter toolbar */}
       <div className="sticky top-16 z-30 -mx-4 mb-6 border-b bg-background/85 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">

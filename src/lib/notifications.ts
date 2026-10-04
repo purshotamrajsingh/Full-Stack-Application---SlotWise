@@ -13,7 +13,8 @@ export type NotificationType =
   | "booking_cancelled" // → provider
   | "booking_rescheduled" // → provider
   | "time_off_conflict" // → customer (time off added over their booking)
-  | "waitlist_opened"; // → customer (a watched slot just freed up)
+  | "waitlist_opened" // → customer (a watched slot just freed up)
+  | "broadcast"; // → admin-initiated message to a whole audience
 
 interface CreateInput {
   userId: string;

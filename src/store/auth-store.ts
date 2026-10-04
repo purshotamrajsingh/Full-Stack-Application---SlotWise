@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { apiFetch } from "@/lib/client-api";
+import { setDisplayTimezone } from "@/lib/format";
 import {
   clearAuthStorage,
   getRefreshToken,
@@ -18,6 +19,13 @@ interface AuthState {
   register: (name: string, email: string, password: string) => Promise<UserDTO>;
   logout: () => void;
   bootstrap: () => Promise<void>;
+  /** Update the signed-in customer's display timezone (profile + all views). */
+  updateTimezone: (timezone: string) => Promise<UserDTO>;
+}
+
+function applyUser(user: UserDTO | null) {
+  // Customers may carry a display timezone; staff views stay business-UTC.
+  setDisplayTimezone(user?.role === "CUSTOMER" ? user.timezone : "UTC");
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -32,6 +40,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     setAccessToken(res.accessToken);
     setRefreshToken(res.refreshToken);
     setCachedUser(JSON.stringify(res.user));
+    applyUser(res.user);
     set({ user: res.user, status: "ready" });
     return res.user;
   },
@@ -44,27 +53,43 @@ export const useAuthStore = create<AuthState>((set) => ({
     setAccessToken(res.accessToken);
     setRefreshToken(res.refreshToken);
     setCachedUser(JSON.stringify(res.user));
+    applyUser(res.user);
     set({ user: res.user, status: "ready" });
     return res.user;
   },
 
   logout: () => {
     clearAuthStorage();
+    applyUser(null);
     set({ user: null, status: "ready" });
   },
 
   bootstrap: async () => {
     if (!getRefreshToken()) {
       clearAuthStorage();
+      applyUser(null);
       set({ user: null, status: "ready" });
       return;
     }
     try {
       const res = await apiFetch<{ user: UserDTO }>("/api/auth/me");
+      applyUser(res.user);
       set({ user: res.user, status: "ready" });
     } catch {
       clearAuthStorage();
+      applyUser(null);
       set({ user: null, status: "ready" });
     }
+  },
+
+  updateTimezone: async (timezone) => {
+    const res = await apiFetch<{ user: UserDTO }>("/api/auth/me", {
+      method: "PATCH",
+      body: { timezone },
+    });
+    setCachedUser(JSON.stringify(res.user));
+    applyUser(res.user);
+    set({ user: res.user });
+    return res.user;
   },
 }));
