@@ -396,7 +396,7 @@ export function BookingDialog() {
                   label="Provider"
                   value={
                     rescheduleMode
-                      ? existing?.providerName
+                      ? existing?.providerName ?? "—"
                       : chosenProvider?.name ?? "—"
                   }
                 />

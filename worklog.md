@@ -98,3 +98,29 @@ Stage Summary:
 - Status: STABLE + feature round complete. All round-1 features shipped and verified (candidates 3 and 5 from the backlog, plus styling/detail work).
 - Risks: none open. Seed re-run wiped earlier ad-hoc QA bookings (expected — demo data only).
 - Next-phase recommendations (priority order): (a) pagination on admin bookings table (list capped at 300); (b) revenue trend line chart (current vs previous period overlay); (c) WebSocket live diary updates for providers (mini-service on port 3003); (d) per-business timezone support; (e) PDF export of the 500-word report for submission.
+
+---
+Task ID: cron-r2 (webDevReview round 2)
+Agent: Primary (Z.ai Code) — scheduled review
+Task: QA sweep via agent-browser, then fix bugs + ship round-2 features (pagination, revenue trend, diary nav, notes editing, styling polish)
+
+Work Log:
+- QA sweep (desktop 1280 + mobile 375 + dark mode): all 3 role portals, E2E booking flow (dialog → slot → confirm → toast), overlap guard re-verified (409 SLOT_TAKEN on duplicate), CSV export (395 rows RFC-4180), footer/dark/mobile OK. No page errors.
+- BUG FOUND + FIXED (robustness): `handle()` in lib/api.ts let ZodErrors surface as 500 INTERNAL; invalid client input (e.g. `startAt:"bad"`) now returns 422 VALIDATION_FAILED with a readable field message. Verified: 422 on bad POST, 422 on empty PATCH body.
+- BUG FOUND + FIXED (styling): ui/alert-dialog.tsx AlertDialogAction ignored `variant` — "Yes, cancel it" rendered primary emerald instead of destructive red. Added VariantProps forwarding; confirmed computed bg is now red. This also fixed the same latent issue in admin-services-view soft-delete dialog.
+- BUG FOUND + FIXED (this round's own code): first pagination implementation had a stale-data clamp effect — SWR-style caching meant `data` still held the page-1 response when page became 2, so the effect "reverted" to page 1 (fetch log: page=1 → 2 → 1). Removed the clamp; all handlers now base jumps on `data.page` (server clamps + reports effective page). Re-verified: next → "Showing 26–50 of 937" sticks.
+- FEATURE: server-side pagination on GET /api/bookings — optional `page`/`pageSize` (5–100, default 20); response `{items,total,page,pageSize,pageCount}`; omitted → legacy `{items,total}` shape (other views untouched). Verified: page 2/94, deep jump to page 94 ("Showing 931–937").
+- FEATURE: admin bookings table pagination UI — 25/page default, rows-per-page selector (10/25/50/100), compact page-window (1 … 4 ⟨5⟩ 6 … 94), prev/next with aria-labels, "Showing X–Y of Z" + "Page N of M" captions, sticky thead, filters reset page to 1. VLM-verified rendering.
+- FEATURE: revenue trend chart — analytics.ts now builds `revenueTrend` (cumulative completed revenue by day-offset, current vs previous period; prevRange select now includes startAt). Full-width chart card above the 2×2 grid: solid line (this period) vs dashed muted line (previous), £-formatted Y axis, header legend with both period totals. VLM-verified: "two data lines, rising cumulative trend, no glitches" (initial 'blank' reports were a screenshot framing issue — chart starts at y=578 vs 577px viewport).
+- FEATURE: provider diary day navigation — DayNavigator (prev/next, ±60d back/+30d forward bounds, relative label today/tomorrow/in N days, "Back to today"), tab renamed "Diary (n)", stats card follows the selected day. Verified: next → "Mon, 5 Oct 2026 (tomorrow)" + "Diary (7)", back → "Sun, 4 Oct 2026 (today)" + "Diary (2)".
+- FEATURE: booking notes editing — PATCH /api/bookings/:id now dual-mode (`{startAt}` reschedule or `{notes}` edit/clear; PENDING/CONFIRMED only, own bookings only; notes can also ride along a reschedule). Customer UI: inline Popover editor (pencil button, char counter, save/discard). Verified E2E: fill "Please bring extra towels" → toast → card shows note → API confirms.
+- Styling polish pass: KPI cards hover ring+shadow, chart cards hover shadow, recent-bookings table row hover, customer/provider stat cards hover, table service column font-medium, sticky table headers.
+- Cleaned 5 pre-existing tsc errors (all round-1): enrichProvider now takes structural ProviderEnrichInput (narrow user select OK); Toaster `rich` prop removed; booking-dialog provider fallback `?? "—"`; star-rating React import fixed.
+- README updated: feature table (notes, diary navigator, pagination, trend chart rows), API reference (dual-mode PATCH, paginated GET, revenueTrend), security model (422 note).
+
+Stage Summary:
+- Status: STABLE + round-2 complete. lint 0 problems, tsc 0 errors in src/, dev.log all 200s, health OK.
+- Verification: curl (422/400/409 paths, pagination math, trend payload), agent-browser DOM checks on every new UI element, VLM visual QA (trend chart, pagination footer) — all pass. Mobile 375px no overflow, footer sticky, dark mode OK.
+- Data note: QA round added 2 demo bookings (Oct 4 posture via dialog, Oct 8 overlap base) + notes on sam's bookings — realistic demo data, kept.
+- Known non-issues: screenshots of the bookings card need pageSize=10 to fit a viewport (card is ~1800px tall at 25 rows); Next.js dev-tools "N" badge in screenshots is dev-only.
+- Next-phase recommendations (priority order): (a) WebSocket live diary updates for providers (mini-service port 3003) — the last big architectural item; (b) per-business timezone support replacing the UTC simplification; (c) review editing/deleting within a window; (d) admin services table pagination (currently 11 rows, low priority); (e) PDF export of the 500-word submission report.

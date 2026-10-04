@@ -38,8 +38,10 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **Sorting** | Price ↑/↓, rating, **next available slot**, duration, popularity, name |
 | **3-click booking** | Provider → slot grid → confirm. Slot grid is 15-min aligned, respects availability windows, lead time (60 min) and existing bookings; booked slots are greyed out |
 | **Reschedule / cancel** | Customers reschedule or cancel their own pending/confirmed bookings with the same overlap guard |
-| **Provider portal** | Today's diary, one-click confirm / complete / no-show / cancel with server-enforced status transitions, weekly availability editor with overlap validation |
-| **Admin dashboard** | KPIs (revenue, expected revenue, no-show rate, avg rating, active customers) with **previous-period trend deltas**, bookings-per-day area chart, revenue by service, **peak hours**, status mix donut, top providers, revenue by category — all live |
+| **Booking notes** | Customers attach a note per booking and edit it any time while pending/confirmed (inline popover editor); providers see the note in the diary |
+| **Provider portal** | Day-by-day **diary navigator** (±60 d back / +30 d forward, “back to today”), one-click confirm / complete / no-show / cancel with server-enforced status transitions, weekly availability editor with overlap validation |
+| **Admin dashboard** | KPIs (revenue, expected revenue, no-show rate, avg rating, active customers) with **previous-period trend deltas**, **cumulative revenue trend chart** (this period vs previous overlay), bookings-per-day area chart, revenue by service, **peak hours**, status mix donut, top providers, revenue by category — all live |
+| **Admin bookings table** | **Server-side pagination** (`page`/`pageSize` up to 100, 937 bookings across 38 pages), compact page-window navigation, rows-per-page selector, live search/status/date filters that reset to page 1 |
 | **CSV export** | Authenticated download of all bookings in a chosen range (RFC-4180 escaping) |
 | **Provider profiles** | Public profile dialog: bio, specialty, weekly schedule grid, bookable services and recent reviews — one click from any provider chip |
 | **Customer insights** | "My bookings" stats: next-visit countdown, upcoming count, completed visits, lifetime spend; landing page testimonials pulled live from verified reviews |
@@ -223,9 +225,9 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/bookings` | any (role-scoped) | customers→own, providers→own diary, admin→all; `status, from, to, q, upcoming, sort` |
-| POST | `/bookings` | customer | `{ serviceId, providerId, startAt, notes? }` — transactional overlap guard → `409 SLOT_TAKEN` |
-| PATCH | `/bookings/:id` | customer (own) | reschedule `{ startAt }` — same guard, excludes itself |
+| GET | `/bookings` | any (role-scoped) | customers→own, providers→own diary, admin→all; `status, from, to, q, upcoming, sort`. Optional `page`+`pageSize` → paginated `{items,total,page,pageSize,pageCount}` (server clamps out-of-range pages); omitted → legacy `{items,total}` |
+| POST | `/bookings` | customer | `{ serviceId, providerId, startAt, notes? }` — transactional overlap guard → `409 SLOT_TAKEN`; invalid input → `422 VALIDATION_FAILED` |
+| PATCH | `/bookings/:id` | customer (own) | two modes: `{ startAt }` reschedule (same guard, excludes itself) or `{ notes }` — edit/clear the note (PENDING/CONFIRMED only) |
 | DELETE | `/bookings/:id` | owner/provider/admin | cancel (PENDING/CONFIRMED only) |
 | PATCH | `/bookings/:id/status` | provider (own) / admin | enforced transitions: PENDING→CONFIRMED\|CANCELLED, CONFIRMED→COMPLETED\|NO_SHOW\|CANCELLED |
 | POST | `/bookings/:id/review` | customer (own) | COMPLETED only, once; `{ rating 1-5, comment? }` |
@@ -234,7 +236,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs (incl. previous-period deltas) + all chart series |
+| GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs (incl. previous-period deltas) + all chart series incl. `revenueTrend` (cumulative this-period vs previous) |
 | GET | `/dashboard/export` | admin | `range` → CSV download |
 | GET | `/categories` | public | distinct categories + counts |
 | GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials) |
@@ -284,7 +286,8 @@ to the service.
   on every refresh; separate secrets; type-claim prevents token-kind confusion.
 - **RBAC**: `requireSession(req, roles)` guard on every protected route; role always re-read
   from the database (revoking a role takes effect immediately, not at token expiry).
-- **Input validation**: Zod schemas on every mutating endpoint.
+- **Input validation**: Zod schemas on every mutating endpoint; schema failures return
+  `422 VALIDATION_FAILED` with a readable field message (never a 500).
 - **Authorization**: booking ownership checks (customer can only touch *own* bookings;
   provider only *own* diary rows); public registration can't grant roles.
 - **SQL injection**: impossible by construction (Prisma parameterised queries).

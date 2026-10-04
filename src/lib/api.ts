@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError, type ZodIssue } from "zod";
 
 /** Typed HTTP error thrown by handlers, converted to a JSON response by `handle`. */
 export class HttpError extends Error {
@@ -20,7 +21,25 @@ export function fail(status: number, code: string, message: string): NextRespons
   return NextResponse.json({ error: message, code }, { status });
 }
 
-/** Wraps a route handler so thrown HttpErrors become clean JSON responses. */
+/** Flattens a Zod validation error into one readable sentence. */
+function zodMessage(issues: ZodIssue[]): string {
+  const first = issues[0];
+  if (!first) return "Invalid request body.";
+  const path = first.path.length > 0 ? `\`${first.path.join(".")}\`` : "body";
+  const detail =
+    first.code === "too_small"
+      ? `${path} is too short`
+      : first.code === "too_big"
+        ? `${path} is too long`
+        : `${path} is invalid`;
+  return `Validation failed: ${detail} (${first.message}).`;
+}
+
+/**
+ * Wraps a route handler so thrown HttpErrors become clean JSON responses.
+ * Zod validation failures (client input) map to 422 VALIDATION_FAILED —
+ * they must never surface as 500s.
+ */
 export async function handle(
   fn: () => Promise<NextResponse>,
 ): Promise<NextResponse> {
@@ -29,6 +48,9 @@ export async function handle(
   } catch (err) {
     if (err instanceof HttpError) {
       return fail(err.status, err.code, err.message);
+    }
+    if (err instanceof ZodError) {
+      return fail(422, "VALIDATION_FAILED", zodMessage(err.issues));
     }
     console.error("[api] unhandled error:", err);
     return fail(500, "INTERNAL", "Something went wrong. Please try again.");

@@ -61,11 +61,20 @@ export async function GET(req: NextRequest) {
       where.startAt = { ...(where.startAt as object), gte: new Date() };
     }
 
+    // Optional server-side pagination (used by the admin bookings table).
+    // Omitted -> legacy unpaginated response shape (other views keep working).
+    const rawPage = Math.max(1, Number.parseInt(params.get("page") ?? "", 10) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(5, Number.parseInt(params.get("pageSize") ?? "", 10) || 20),
+    );
+    const paged = params.has("page");
+
     const bookings = await db.booking.findMany({
       where,
       include: bookingInclude,
       orderBy: { startAt: "desc" },
-      take: 300,
+      take: paged ? 1000 : 300,
     });
 
     let items = bookings.map(toBookingDTO);
@@ -85,6 +94,20 @@ export async function GET(req: NextRequest) {
     else if (sort === "created_desc") items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     else if (sort === "price_desc") items.sort((a, b) => b.price - a.price);
     else items.sort((a, b) => b.startAt.localeCompare(a.startAt));
+
+    if (paged) {
+      const total = items.length;
+      const pageCount = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(Math.max(1, rawPage), pageCount);
+      const start = (page - 1) * pageSize;
+      return ok({
+        items: items.slice(start, start + pageSize),
+        total,
+        page,
+        pageSize,
+        pageCount,
+      });
+    }
 
     return ok({ items, total: items.length });
   });

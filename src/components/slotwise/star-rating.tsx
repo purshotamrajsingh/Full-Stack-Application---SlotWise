@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +48,7 @@ interface StarPickerProps {
 
 /** Interactive 1–5 star picker used in the review dialog. */
 export function StarPicker({ value, onChange, className }: StarPickerProps) {
-  const [hover, setHover] = React.useState(0);
+  const [hover, setHover] = useState(0);
   const shown = hover || value;
   return (
     <div className={cn("flex items-center gap-1", className)} role="radiogroup" aria-label="Rating">

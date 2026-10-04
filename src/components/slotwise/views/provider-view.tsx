@@ -5,6 +5,8 @@ import {
   CalendarClock,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Loader2,
   Plus,
@@ -32,18 +34,22 @@ import { useApiQuery } from "@/hooks/use-api-query";
 import { apiFetch } from "@/lib/client-api";
 import type { AvailabilityDTO, BookingDTO } from "@/lib/types";
 import {
+  WEEKDAY_LABELS,
+  addDaysKey,
   fmtDateUTC,
   fmtDuration,
   fmtMoney,
   fmtTimeUTC,
   minutesToTime,
   todayKey,
-  WEEKDAY_LABELS,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => i * 15);
 const STATUS_OPTIONS = ["ALL", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"];
+/** How far the diary navigator can travel from today. */
+const DIARY_PAST_DAYS = 60;
+const DIARY_FUTURE_DAYS = 30;
 
 /** Skips common title prefixes so "Dr. Priya Nair" greets as "Priya". */
 function firstName(name: string): string {
@@ -54,6 +60,7 @@ function firstName(name: string): string {
 export function ProviderView() {
   const user = useAuthStore((s) => s.user);
   const [tab, setTab] = useState("today");
+  const [dayOffset, setDayOffset] = useState(0);
 
   const bookingsPath = useMemo(() => "/api/bookings?sort=date_asc", []);
   const { data, loading, error, reload } = useApiQuery<{ items: BookingDTO[] }>(bookingsPath);
@@ -63,9 +70,10 @@ export function ProviderView() {
 
   const bookings = data?.items ?? [];
   const today = todayKey();
+  const selectedKey = addDaysKey(today, dayOffset);
 
-  const todays = bookings.filter(
-    (b) => b.startAt.slice(0, 10) === today && b.status !== "CANCELLED",
+  const dayBookings = bookings.filter(
+    (b) => b.startAt.slice(0, 10) === selectedKey && b.status !== "CANCELLED",
   );
   const upcoming = bookings.filter(
     (b) => b.startAt > new Date().toISOString() && (b.status === "PENDING" || b.status === "CONFIRMED"),
@@ -89,7 +97,12 @@ export function ProviderView() {
 
       {/* Stats */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon={CalendarClock} label="Today" value={String(todays.length)} sub="appointments" />
+        <StatCard
+          icon={CalendarClock}
+          label={dayOffset === 0 ? "Today" : "Diary"}
+          value={String(dayBookings.length)}
+          sub={dayOffset === 0 ? "appointments" : fmtDateUTC(`${selectedKey}T00:00:00.000Z`).replace(/, \d{4}$/, "")}
+        />
         <StatCard icon={CalendarDays} label="Upcoming" value={String(upcoming.length)} sub="pending & confirmed" />
         <StatCard
           icon={Star}
@@ -107,25 +120,32 @@ export function ProviderView() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="today">Today ({todays.length})</TabsTrigger>
+          <TabsTrigger value="today">Diary ({dayBookings.length})</TabsTrigger>
           <TabsTrigger value="all">All bookings</TabsTrigger>
           <TabsTrigger value="availability">Availability</TabsTrigger>
         </TabsList>
 
         <TabsContent value="today" className="mt-4">
-          {error ? (
-            <EmptyState icon={CalendarDays} title="Could not load schedule" description={error} />
-          ) : loading ? (
-            <SkeletonList n={3} />
-          ) : todays.length === 0 ? (
-            <EmptyState
-              icon={CalendarDays}
-              title="Nothing booked today"
-              description="Enjoy the quiet — or share your booking link to fill the gaps."
-            />
-          ) : (
-            <BookingList bookings={todays} onChanged={reload} showCustomer />
-          )}
+          <DayNavigator
+            dayOffset={dayOffset}
+            selectedKey={selectedKey}
+            onOffset={setDayOffset}
+          />
+          <div className="mt-4">
+            {error ? (
+              <EmptyState icon={CalendarDays} title="Could not load schedule" description={error} />
+            ) : loading ? (
+              <SkeletonList n={3} />
+            ) : dayBookings.length === 0 ? (
+              <EmptyState
+                icon={CalendarDays}
+                title="Nothing booked this day"
+                description="Browse another day, or share your booking link to fill the gaps."
+              />
+            ) : (
+              <BookingList bookings={dayBookings} onChanged={reload} showCustomer />
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="all" className="mt-4">
@@ -156,7 +176,7 @@ function StatCard({
   sub: string;
 }) {
   return (
-    <Card className="py-0">
+    <Card className="py-0 transition-shadow duration-200 hover:shadow-md">
       <CardContent className="flex items-center gap-3 p-4">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
           <Icon className="size-4.5" />
@@ -168,6 +188,64 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Prev/next day stepper with a quick "back to today" button. */
+function DayNavigator({
+  dayOffset,
+  selectedKey,
+  onOffset,
+}: {
+  dayOffset: number;
+  selectedKey: string;
+  onOffset: (n: number) => void;
+}) {
+  const relative =
+    dayOffset === 0
+      ? "today"
+      : dayOffset === 1
+        ? "tomorrow"
+        : dayOffset === -1
+          ? "yesterday"
+          : dayOffset > 0
+            ? `in ${dayOffset} days`
+            : `${-dayOffset} days ago`;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="Previous day"
+          disabled={dayOffset <= -DIARY_PAST_DAYS}
+          onClick={() => onOffset(dayOffset - 1)}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="Next day"
+          disabled={dayOffset >= DIARY_FUTURE_DAYS}
+          onClick={() => onOffset(dayOffset + 1)}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+      <p className="min-w-0 flex-1 text-sm">
+        <span className="font-semibold">{fmtDateUTC(`${selectedKey}T00:00:00.000Z`)}</span>{" "}
+        <span className="text-muted-foreground">({relative})</span>
+      </p>
+      {dayOffset !== 0 && (
+        <Button variant="secondary" size="sm" onClick={() => onOffset(0)}>
+          Back to today
+        </Button>
+      )}
+    </div>
   );
 }
 

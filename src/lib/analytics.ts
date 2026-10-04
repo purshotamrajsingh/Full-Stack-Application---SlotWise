@@ -33,6 +33,12 @@ export interface DashboardResult {
     bookings: number;
     revenue: number;
   }[];
+  revenueTrend: {
+    offset: number;
+    label: string;
+    current: number;
+    previous: number;
+  }[];
   revenueByService: {
     service: string;
     category: string;
@@ -80,7 +86,7 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
             lt: from,
           },
         },
-        select: { status: true, service: { select: { price: true } } },
+        select: { status: true, startAt: true, service: { select: { price: true } } },
       }),
       db.booking.findMany({
         where: { startAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED"] } },
@@ -152,6 +158,43 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
       })}`,
       bookings: entry.bookings,
       revenue: entry.revenue,
+    });
+  }
+
+  // Cumulative revenue trend: running completed revenue per day-offset,
+  // current range overlaid with the equally long window before it.
+  const dailyRevenue = (list: { status: string; startAt: Date; service: { price: number } }[]) => {
+    const byOffset = new Map<number, number>();
+    const base = list === inRange ? from : new Date(from.getTime() - range * DAY_MS);
+    for (const b of list) {
+      if (b.status !== "COMPLETED") continue;
+      const idx = Math.floor(
+        (b.startAt.getTime() - base.getTime()) / DAY_MS,
+      );
+      if (idx < 0 || idx >= range) continue;
+      byOffset.set(idx, (byOffset.get(idx) ?? 0) + b.service.price);
+    }
+    let running = 0;
+    const out: number[] = [];
+    for (let i = 0; i < range; i++) {
+      running += byOffset.get(i) ?? 0;
+      out.push(running);
+    }
+    return out;
+  };
+  const currentCum = dailyRevenue(inRange);
+  const previousCum = dailyRevenue(prevRange);
+  const revenueTrend: DashboardResult["revenueTrend"] = [];
+  for (let i = 0; i < range; i++) {
+    const day = new Date(from.getTime() + i * DAY_MS);
+    revenueTrend.push({
+      offset: i + 1,
+      label: `${day.getUTCDate()} ${day.toLocaleString("en-GB", {
+        month: "short",
+        timeZone: "UTC",
+      })}`,
+      current: Math.round(currentCum[i]! * 100) / 100,
+      previous: Math.round(previousCum[i]! * 100) / 100,
     });
   }
 
@@ -270,6 +313,7 @@ export async function buildDashboard(rangeDays = 30): Promise<DashboardResult> {
           : null,
     },
     bookingsPerDay,
+    revenueTrend,
     revenueByService,
     peakHours,
     topProviders,

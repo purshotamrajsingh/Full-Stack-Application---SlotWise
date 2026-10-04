@@ -192,11 +192,32 @@ async function computeNextAvailableMap(
   return result;
 }
 
+/**
+ * Structural input for enrichProvider — accepts any Prisma payload whose
+ * include covers the fields below (full `user: true` or a narrower
+ * `{ select: { name, email } }` both satisfy it).
+ */
+export interface ProviderEnrichInput {
+  id: string;
+  userId: string;
+  bio: string;
+  specialty: string;
+  isActive: boolean;
+  user: { name: string; email: string };
+  services: {
+    service: {
+      id: string;
+      name: string;
+      category: string;
+      price: number;
+      durationMin: number;
+    };
+  }[];
+}
+
 /** Serialises a provider (with user + services) for public listing/staff views. */
 export async function enrichProvider(
-  provider: Prisma.ProviderGetPayload<{
-    include: { user: true; services: { include: { service: true } } };
-  }>,
+  provider: ProviderEnrichInput,
 ): Promise<{
   id: string;
   userId: string;

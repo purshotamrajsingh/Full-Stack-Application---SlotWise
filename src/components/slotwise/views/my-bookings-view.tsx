@@ -6,7 +6,9 @@ import {
   CalendarRange,
   CheckCircle2,
   Clock,
+  Loader2,
   MessageSquareHeart,
+  PencilLine,
   RotateCcw,
   Sparkles,
   Wallet,
@@ -17,6 +19,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -209,6 +217,7 @@ export function MyBookingsView() {
               onReschedule={() => openReschedule(b.id)}
               onCancel={() => setCancelTarget(b)}
               onReview={() => setReviewTarget(b)}
+              onNotesSaved={reload}
             />
           ))}
         </div>
@@ -255,24 +264,116 @@ function CountPill({ n }: { n: number }) {
   );
 }
 
+/** Inline editor for the customer's booking note (pending/confirmed only). */
+function NotesEditor({
+  booking,
+  onSaved,
+}: {
+  booking: BookingDTO;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(booking.notes ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await apiFetch(`/api/bookings/${booking.id}`, {
+        method: "PATCH",
+        body: { notes: value.trim() ? value.trim() : null },
+      });
+      toast.success("Note updated.");
+      setOpen(false);
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save note.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setValue(booking.notes ?? "");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className={cn(booking.notes && "border-primary/40")}
+          aria-label="Edit booking note"
+        >
+          <PencilLine className="size-3.5" />
+          {booking.notes ? "Note" : "Add note"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80" align="end">
+        <div className="flex flex-col gap-3">
+          <div>
+            <p className="text-sm font-semibold">Booking note</p>
+            <p className="text-xs text-muted-foreground">
+              Visible to {booking.providerName} when they open the diary.
+            </p>
+          </div>
+          <Textarea
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            maxLength={300}
+            rows={3}
+            placeholder="e.g. Running 5 minutes late, sorry!"
+            aria-label="Booking note"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {value.length}/300
+            </span>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+                Discard
+              </Button>
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+                Save note
+              </Button>
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function BookingCard({
   booking,
   busy,
   onReschedule,
   onCancel,
   onReview,
+  onNotesSaved,
 }: {
   booking: BookingDTO;
   busy: boolean;
   onReschedule: () => void;
   onCancel: () => void;
   onReview: () => void;
+  onNotesSaved: () => void;
 }) {
   const active = booking.status === "PENDING" || booking.status === "CONFIRMED";
   const canReview = booking.status === "COMPLETED" && !booking.review;
 
   return (
-    <Card className={cn("py-0 transition-opacity", busy && "opacity-50")}>
+    <Card
+      className={cn(
+        "py-0 transition-opacity",
+        busy && "opacity-50",
+        !busy && "transition-all duration-200 hover:shadow-md",
+      )}
+    >
       <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 items-start gap-4">
           <div className="flex w-16 shrink-0 flex-col items-center rounded-lg border bg-muted/50 py-2">
@@ -319,6 +420,7 @@ function BookingCard({
           <div className="flex flex-wrap gap-1.5">
             {active && (
               <>
+                <NotesEditor booking={booking} onSaved={onNotesSaved} />
                 <Button size="sm" variant="outline" onClick={onReschedule} disabled={busy}>
                   <RotateCcw className="size-3.5" /> Reschedule
                 </Button>
@@ -351,7 +453,7 @@ function CustomerStat({
   sub?: string;
 }) {
   return (
-    <Card className="py-0">
+    <Card className="py-0 transition-shadow duration-200 hover:shadow-md">
       <CardContent className="flex items-center gap-3 p-4">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
           <Icon className="size-4.5" />

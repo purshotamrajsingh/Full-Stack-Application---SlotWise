@@ -6,9 +6,14 @@ import { requireSession } from "@/lib/auth";
 import { bookingInclude, toBookingDTO } from "@/lib/serialize";
 import { isWithinAvailability, LEAD_MIN } from "@/lib/slots";
 
-const rescheduleSchema = z.object({
-  startAt: z.string().min(10),
-});
+const updateSchema = z
+  .object({
+    startAt: z.string().min(10).optional(),
+    notes: z.string().trim().max(300).nullable().optional(),
+  })
+  .refine((v) => v.startAt !== undefined || v.notes !== undefined, {
+    message: "Provide a new startAt or notes.",
+  });
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -53,14 +58,43 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 }
 
 /**
- * PATCH /api/bookings/:id — reschedules (customer, own booking only).
- * Runs the same transactional overlap guard as creation, excluding itself.
+ * PATCH /api/bookings/:id — update a customer's own booking.
+ *
+ * Two modes on one endpoint:
+ *  - `{ startAt }` (optionally with `notes`) → reschedule. Runs the same
+ *    transactional overlap guard as creation, excluding itself.
+ *  - `{ notes }` only → edit the booking note (PENDING/CONFIRMED only).
  */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   return handle(async () => {
     const session = await requireSession(req, ["CUSTOMER"]);
     const { id } = await ctx.params;
-    const body = rescheduleSchema.parse(await readJson(req));
+    const body = updateSchema.parse(await readJson(req));
+
+    // Notes-only edit: no time math, no overlap guard needed.
+    if (body.startAt === undefined) {
+      const booking = await db.booking.findUnique({
+        where: { id },
+        include: bookingInclude,
+      });
+      if (!booking) throw new HttpError(404, "NOT_FOUND", "Booking not found.");
+      if (booking.customerId !== session.id) {
+        throw new HttpError(403, "FORBIDDEN", "You can only edit your own bookings.");
+      }
+      if (!["PENDING", "CONFIRMED"].includes(booking.status)) {
+        throw new HttpError(
+          400,
+          "BAD_STATE",
+          "Notes can only be edited while the booking is pending or confirmed.",
+        );
+      }
+      const updated = await db.booking.update({
+        where: { id },
+        data: { notes: body.notes && body.notes.length > 0 ? body.notes : null },
+        include: bookingInclude,
+      });
+      return ok({ booking: toBookingDTO(updated) });
+    }
 
     const startAt = new Date(body.startAt);
     if (Number.isNaN(startAt.getTime())) {
@@ -128,7 +162,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
       return tx.booking.update({
         where: { id: booking.id },
-        data: { startAt, endAt },
+        data: {
+          startAt,
+          endAt,
+          ...(body.notes !== undefined
+            ? { notes: body.notes && body.notes.length > 0 ? body.notes : null }
+            : {}),
+        },
         include: bookingInclude,
       });
     });

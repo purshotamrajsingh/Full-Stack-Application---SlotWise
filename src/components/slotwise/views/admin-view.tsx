@@ -14,7 +14,20 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -202,6 +215,29 @@ function OverviewSection() {
         />
       </div>
 
+      {/* Revenue trend — current vs previous period */}
+      <ChartCard
+        title="Revenue trend"
+        description={`Running completed revenue — last ${range} days vs the ${range} days before`}
+        loading={loading}
+        action={
+          k ? (
+            <div className="flex items-center gap-3 text-xs">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-0.5 w-4 rounded-full bg-[var(--chart-1)]" />
+                This period · {fmtMoney(k.revenue)}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <span className="inline-block h-0.5 w-4 rounded-full bg-[var(--muted-foreground)] opacity-60" />
+                Previous · {fmtMoney(k.prevRevenue)}
+              </span>
+            </div>
+          ) : undefined
+        }
+      >
+        <RevenueTrendChart data={data?.revenueTrend ?? []} />
+      </ChartCard>
+
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard
@@ -337,11 +373,11 @@ function OverviewSection() {
                       </tr>
                     ))
                   : (data?.recentBookings ?? []).map((b) => (
-                      <tr key={b.id} className="border-b last:border-0">
+                      <tr key={b.id} className="border-b transition-colors last:border-0 hover:bg-muted/40">
                         <td className="whitespace-nowrap px-5 py-3 tabular-nums">
                           {fmtDateShortUTC(b.startAt)} {fmtTimeUTC(b.startAt)}
                         </td>
-                        <td className="px-5 py-3">{b.serviceName}</td>
+                        <td className="px-5 py-3 font-medium">{b.serviceName}</td>
                         <td className="hidden px-5 py-3 text-muted-foreground sm:table-cell">
                           {b.providerName}
                         </td>
@@ -396,7 +432,7 @@ function Kpi({
           : "down";
 
   return (
-    <Card className="py-0">
+    <Card className="py-0 transition-all duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/15">
       <CardContent className="p-4">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Icon className="size-3.5" />
@@ -453,22 +489,85 @@ function ChartCard({
   description,
   children,
   loading,
+  className,
+  action,
 }: {
   title: string;
   description: string;
   children: React.ReactNode;
   loading: boolean;
+  className?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <Card className="py-0">
+    <Card className={cn("py-0 transition-shadow duration-200 hover:shadow-md", className)}>
       <CardHeader className="border-b">
-        <CardTitle className="text-base">{title}</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">{title}</CardTitle>
+          {action}
+        </div>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="p-4 pt-4">
         {loading ? <Skeleton className="h-56 w-full" /> : children}
       </CardContent>
     </Card>
+  );
+}
+
+function RevenueTrendChart({ data }: { data: DashboardDTO["revenueTrend"] }) {
+  const config = {
+    current: { label: "This period", color: "var(--chart-1)" },
+    previous: { label: "Previous period", color: "var(--muted-foreground)" },
+  } satisfies ChartConfig;
+
+  return (
+    <ChartContainer config={config} className="h-64 w-full">
+      <LineChart data={data} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          minTickGap={32}
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tickMargin={4}
+          width={52}
+          tickFormatter={(v: number) =>
+            v >= 1000 ? `£${Math.round(v / 100) / 10}k` : `£${v}`
+          }
+        />
+        <ChartTooltip
+          content={
+            <ChartTooltipContent
+              indicator="line"
+              formatter={(v) => fmtMoney(Number(v))}
+            />
+          }
+        />
+        <Line
+          dataKey="previous"
+          type="monotone"
+          stroke="var(--color-previous)"
+          strokeWidth={1.5}
+          strokeDasharray="5 4"
+          dot={false}
+          activeDot={{ r: 3, strokeWidth: 0 }}
+        />
+        <Line
+          dataKey="current"
+          type="monotone"
+          stroke="var(--color-current)"
+          strokeWidth={2.5}
+          dot={false}
+          activeDot={{ r: 4, strokeWidth: 0 }}
+        />
+      </LineChart>
+    </ChartContainer>
   );
 }
 

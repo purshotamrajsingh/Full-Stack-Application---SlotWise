@@ -163,6 +163,14 @@ export interface DayPoint {
   revenue: number;
 }
 
+/** Cumulative completed revenue by day-offset: current range vs the range before it. */
+export interface RevenueTrendPoint {
+  offset: number;
+  label: string;
+  current: number;
+  previous: number;
+}
+
 export interface ServiceRevenuePoint {
   service: string;
   category: string;
@@ -199,6 +207,7 @@ export interface DashboardDTO {
   range: number;
   kpis: DashboardKPIs;
   bookingsPerDay: DayPoint[];
+  revenueTrend: RevenueTrendPoint[];
   revenueByService: ServiceRevenuePoint[];
   peakHours: HourPoint[];
   topProviders: ProviderStatPoint[];
