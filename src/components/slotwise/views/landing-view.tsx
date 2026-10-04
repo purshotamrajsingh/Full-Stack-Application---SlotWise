@@ -11,7 +11,9 @@ import {
   CalendarClock,
   CalendarX2,
   CheckCircle2,
+  Clock,
   MousePointerClick,
+  Reply,
   Search,
   ShieldCheck,
   Sparkles,
@@ -21,12 +23,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ServiceCard } from "@/components/slotwise/service-card";
 import { StarRating } from "@/components/slotwise/star-rating";
+import { StatusBadge } from "@/components/slotwise/status-badge";
 import { useUIStore } from "@/store/ui-store";
+import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
-import type { ServiceDTO, TestimonialEntry } from "@/lib/types";
-import { fmtMoney, initials } from "@/lib/format";
+import type { BookingDTO, ServiceDTO, TestimonialEntry } from "@/lib/types";
+import { fmtDateUTC, fmtMoney, fmtTimeUTC, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const fadeUp = {
@@ -198,6 +203,9 @@ export function LandingView() {
         </div>
       </section>
 
+      {/* Signed-in customers: their earliest upcoming appointment */}
+      <NextAppointmentCard />
+
       {/* Live activity ticker — social proof from the last 24 hours */}
       <LiveTicker />
 
@@ -327,6 +335,17 @@ export function LandingView() {
                     <p className="flex-1 text-sm leading-relaxed text-muted-foreground">
                       “{t.comment}”
                     </p>
+                    {t.reply && (
+                      <div className="rounded-lg border-l-2 border-primary/40 bg-muted/60 px-3 py-2">
+                        <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          <Reply className="size-3 shrink-0 text-primary" />
+                          {t.providerName} replied
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                          {t.reply}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2.5 border-t pt-3">
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                         {initials(t.authorName)}
@@ -425,6 +444,106 @@ export function LandingView() {
         </motion.div>
       </section>
     </div>
+  );
+}
+
+/* ─── Your next appointment (signed-in customers only) ─────────────────── */
+
+/**
+ * Friendly relative countdown to an upcoming booking.
+ * Under an hour the copy switches to "Starting soon" (the card pulses too).
+ */
+function countdownUntil(iso: string): string {
+  const mins = Math.floor((new Date(iso).getTime() - Date.now()) / 60_000);
+  if (mins < 60) return "Starting soon";
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    const rem = mins % 60;
+    return rem === 0 ? `in ${hours} hr` : `in ${hours} hr ${rem} min`;
+  }
+  const days = Math.ceil(hours / 24);
+  return days === 1 ? "tomorrow" : `in ${days} days`;
+}
+
+/**
+ * Personalised "your next appointment" card, rendered right under the hero
+ * for signed-in CUSTOMERs with at least one upcoming booking. Everyone else
+ * (guests, staff, or customers with nothing booked) sees nothing at all —
+ * no empty state, no reserved space.
+ */
+function NextAppointmentCard() {
+  const nav = useUIStore((s) => s.nav);
+  const user = useAuthStore((s) => s.user);
+  const isCustomer = user?.role === "CUSTOMER";
+
+  // Server-side filtered to upcoming PENDING/CONFIRMED bookings, earliest
+  // first — items[0] IS the next appointment. A null path skips the request
+  // entirely for guests and staff roles.
+  const { data, loading } = useApiQuery<{ items: BookingDTO[] }>(
+    isCustomer
+      ? "/api/bookings?status=PENDING,CONFIRMED&upcoming=1&sort=date_asc"
+      : null,
+  );
+
+  if (!isCustomer) return null;
+
+  if (loading) {
+    return (
+      <section aria-label="Your next appointment" className="border-b">
+        <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6">
+          <Skeleton className="h-36 rounded-2xl sm:h-28" />
+        </div>
+      </section>
+    );
+  }
+
+  const booking = data?.items?.[0];
+  if (!booking) return null;
+
+  const soon =
+    new Date(booking.startAt).getTime() - Date.now() < 60 * 60_000;
+
+  return (
+    <section aria-label="Your next appointment" className="border-b">
+      <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6">
+        <Card
+          className={cn(
+            "gap-0 border-emerald-500/30 bg-emerald-500/10 py-0 shadow-sm",
+            soon && "animate-pulse",
+          )}
+        >
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                <CalendarCheck className="size-3.5" />
+                Your next appointment
+              </p>
+              <p className="text-lg font-bold leading-snug">{booking.serviceName}</p>
+              <p className="text-sm text-muted-foreground">
+                {booking.providerName} · {fmtDateUTC(booking.startAt)} ·{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {fmtTimeUTC(booking.startAt)}
+                </span>
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <StatusBadge status={booking.status} />
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                  <Clock className="size-3.5" />
+                  {countdownUntil(booking.startAt)}
+                </span>
+              </div>
+            </div>
+            <Button
+              className="press shrink-0 self-start sm:self-auto"
+              onClick={() => nav("bookings")}
+            >
+              View my bookings
+              <ArrowRight className="size-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   );
 }
 

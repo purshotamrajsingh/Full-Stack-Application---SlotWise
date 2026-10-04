@@ -11,6 +11,7 @@ import {
   CalendarX2,
   CheckCircle2,
   Clock,
+  Globe,
   Loader2,
   LogIn,
   Plane,
@@ -37,13 +38,16 @@ import { apiFetch, ApiClientError, downloadIcs } from "@/lib/client-api";
 import type { BookingDTO, ServiceDTO, SlotDTO } from "@/lib/types";
 import {
   addDaysKey,
+  activeTimezone,
   fmtDateShortUTC,
   fmtDateUTC,
   fmtDuration,
   fmtMoney,
   fmtTimeUTC,
+  localHour,
   slotGroupLabel,
   todayKey,
+  tzSuffix,
   WEEKDAY_SHORT,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -167,12 +171,17 @@ export function BookingDialog() {
     ? existing?.serviceId ?? null
     : bookingServiceId;
 
+  // The viewed calendar day is the customer's LOCAL day — the slots API
+  // interprets ?date= in the display timezone, so day labels and slot
+  // times (both rendered via fmtTimeUTC/fmtDateUTC) always agree.
+  const tz = activeTimezone();
+
   const slotsPath = useMemo(
     () =>
       providerId && effectiveServiceId
-        ? `/api/providers/${providerId}/slots?date=${date}&serviceId=${effectiveServiceId}`
+        ? `/api/providers/${providerId}/slots?date=${date}&serviceId=${effectiveServiceId}&tz=${encodeURIComponent(tz)}`
         : null,
-    [providerId, effectiveServiceId, date],
+    [providerId, effectiveServiceId, date, tz],
   );
   const { data: slotsData, loading: slotsLoading, reload: reloadSlots } =
     useApiQuery<SlotsResponse>(open && step === 2 ? slotsPath : null);
@@ -251,7 +260,9 @@ export function BookingDialog() {
   const grouped = useMemo(() => {
     const groups = new Map<string, SlotDTO[]>();
     for (const s of slots) {
-      const hour = new Date(s.startAt).getUTCHours();
+      // Group by the DISPLAY timezone hour (a 13:00 slot is Afternoon in
+      // Karachi even though it is 08:00 UTC) — matches the printed times.
+      const hour = localHour(s.startAt);
       const label = slotGroupLabel(hour);
       const list = groups.get(label) ?? [];
       list.push(s);
@@ -506,6 +517,14 @@ export function BookingDialog() {
               })}
             </div>
 
+            {tz !== "UTC" && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Globe className="size-3 shrink-0" />
+                Times shown in your time zone ({tzSuffix()}) — availability is
+                checked exactly.
+              </p>
+            )}
+
             {slotsLoading ? (
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {Array.from({ length: 12 }).map((_, i) => (
@@ -557,7 +576,7 @@ export function BookingDialog() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-8 shrink-0 gap-1.5 border-amber-500/40 bg-card hover:bg-amber-500/20 dark:hover:bg-amber-500/20"
+                      className="h-8 shrink-0 gap-1.5 border-amber-500/40 bg-card hover:bg-amber-500/20 dark:border-amber-500/40 dark:hover:bg-amber-500/20"
                       onClick={() => joinWaitlist(stolen)}
                     >
                       <BellRing className="size-3.5" />

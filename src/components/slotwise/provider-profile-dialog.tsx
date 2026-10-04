@@ -5,6 +5,7 @@ import {
   CalendarClock,
   CalendarDays,
   Quote,
+  Reply,
   Scissors,
   Star,
   UserRound,
@@ -243,6 +244,23 @@ export function ProviderProfileDialog() {
                           {r.serviceName}
                         </Badge>
                       </p>
+                      {/* Business reply — nested bubble under the review */}
+                      {r.reply && (
+                        <div className="mt-2 rounded-lg border-l-2 border-primary/40 bg-background px-3 py-2">
+                          <p className="flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <Reply className="size-3 text-primary" />
+                            Response from {provider.name}
+                            {r.repliedAt && (
+                              <span className="font-normal normal-case tracking-normal">
+                                · {fmtDateShortUTC(r.repliedAt)}
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                            {r.reply}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

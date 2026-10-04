@@ -42,6 +42,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         take: 10,
         include: {
           author: { select: { name: true } },
+          repliedBy: { select: { name: true } },
           booking: { include: { service: { select: { name: true } } } },
         },
       }),
@@ -65,6 +66,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           createdAt: r.createdAt.toISOString(),
           authorName: r.author.name,
           serviceName: r.booking.service.name,
+          reply: r.reply,
+          repliedAt: r.repliedAt ? r.repliedAt.toISOString() : null,
+          repliedByName: r.repliedBy ? r.repliedBy.name : null,
         })),
       },
     });

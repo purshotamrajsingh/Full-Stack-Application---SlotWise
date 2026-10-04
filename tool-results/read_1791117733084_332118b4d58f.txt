@@ -1,0 +1,889 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useState } from "react";
+     4→import {
+     5→  Activity,
+     6→  ArrowDownRight,
+     7→  ArrowUpRight,
+     8→  Banknote,
+     9→  CalendarCheck2,
+    10→  Download,
+    11→  Loader2,
+    12→  Megaphone,
+    13→  Star,
+    14→  TrendingUp,
+    15→  UserRound,
+    16→  Users,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→import {
+    20→  Area,
+    21→  AreaChart,
+    22→  Bar,
+    23→  BarChart,
+    24→  CartesianGrid,
+    25→  Cell,
+    26→  Line,
+    27→  LineChart,
+    28→  Pie,
+    29→  PieChart,
+    30→  XAxis,
+    31→  YAxis,
+    32→} from "recharts";
+    33→import { Button } from "@/components/ui/button";
+    34→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    35→import { Progress } from "@/components/ui/progress";
+    36→import {
+    37→  Dialog,
+    38→  DialogContent,
+    39→  DialogDescription,
+    40→  DialogFooter,
+    41→  DialogHeader,
+    42→  DialogTitle,
+    43→} from "@/components/ui/dialog";
+    44→import { Input } from "@/components/ui/input";
+    45→import { Label } from "@/components/ui/label";
+    46→import { Textarea } from "@/components/ui/textarea";
+    47→import {
+    48→  Select,
+    49→  SelectContent,
+    50→  SelectItem,
+    51→  SelectTrigger,
+    52→  SelectValue,
+    53→} from "@/components/ui/select";
+    54→import { Skeleton } from "@/components/ui/skeleton";
+    55→import {
+    56→  ChartContainer,
+    57→  ChartLegend,
+    58→  ChartLegendContent,
+    59→  ChartTooltip,
+    60→  ChartTooltipContent,
+    61→  type ChartConfig,
+    62→} from "@/components/ui/chart";
+    63→import { StatusBadge } from "@/components/slotwise/status-badge";
+    64→import { AdminServicesView } from "@/components/slotwise/views/admin-services-view";
+    65→import { AdminStaffView } from "@/components/slotwise/views/admin-staff-view";
+    66→import { AdminBookingsView } from "@/components/slotwise/views/admin-bookings-view";
+    67→import { useUIStore } from "@/store/ui-store";
+    68→import { useApiQuery } from "@/hooks/use-api-query";
+    69→import { useRealtime } from "@/hooks/use-realtime";
+    70→import { apiFetch, downloadCsv } from "@/lib/client-api";
+    71→import type { DashboardDTO } from "@/lib/types";
+    72→import { fmtDateShortUTC, fmtDateTimeUTC, fmtMoney, fmtTimeUTC, initials, statusMeta } from "@/lib/format";
+    73→import { cn } from "@/lib/utils";
+    74→
+    75→const STATUS_COLORS: Record<string, string> = {
+    76→  PENDING: "var(--chart-2)",
+    77→  CONFIRMED: "var(--chart-1)",
+    78→  COMPLETED: "var(--chart-4)",
+    79→  CANCELLED: "var(--chart-3)",
+    80→  NO_SHOW: "var(--chart-5)",
+    81→};
+    82→
+    83→export function AdminView() {
+    84→  const tab = useUIStore((s) => s.adminTab);
+    85→  const setTab = useUIStore((s) => s.setAdminTab);
+    86→
+    87→  return (
+    88→    <div className="view-enter mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+    89→      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    90→        <div>
+    91→          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Business dashboard</h1>
+    92→          <p className="mt-1 text-muted-foreground">
+    93→            Revenue, no-shows, peak hours and staff performance — live from the booking database.
+    94→          </p>
+    95→        </div>
+    96→      </div>
+    97→
+    98→      <TabsNav tab={tab} setTab={setTab} />
+    99→
+   100→      {tab === "overview" && <OverviewSection />}
+   101→      {tab === "services" && <AdminServicesView />}
+   102→      {tab === "staff" && <AdminStaffView />}
+   103→      {tab === "bookings" && <AdminBookingsView />}
+   104→    </div>
+   105→  );
+   106→}
+   107→
+   108→function TabsNav({
+   109→  tab,
+   110→  setTab,
+   111→}: {
+   112→  tab: string;
+   113→  setTab: (t: "overview" | "services" | "staff" | "bookings") => void;
+   114→}) {
+   115→  const tabs = [
+   116→    { value: "overview", label: "Overview" },
+   117→    { value: "services", label: "Services" },
+   118→    { value: "staff", label: "Staff" },
+   119→    { value: "bookings", label: "Bookings" },
+   120→  ];
+   121→  return (
+   122→    <div className="mb-6 -mx-4 flex gap-1 overflow-x-auto px-4 pb-1 no-scrollbar sm:mx-0 sm:px-0">
+   123→      {tabs.map((t) => (
+   124→        <button
+   125→          key={t.value}
+   126→          type="button"
+   127→          onClick={() => setTab(t.value as "overview" | "services" | "staff" | "bookings")}
+   128→          className={cn(
+   129→            "shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+   130→            tab === t.value
+   131→              ? "bg-secondary text-secondary-foreground"
+   132→              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+   133→          )}
+   134→        >
+   135→          {t.label}
+   136→        </button>
+   137→      ))}
+   138→    </div>
+   139→  );
+   140→}
+   141→
+   142→function OverviewSection() {
+   143→  const [range, setRange] = useState("30");
+   144→  const [exporting, setExporting] = useState(false);
+   145→  const [livePing, setLivePing] = useState<string | null>(null);
+   146→  const [broadcastOpen, setBroadcastOpen] = useState(false);
+   147→
+   148→  const { data, loading, error, reload } = useApiQuery<DashboardDTO>(
+   149→    `/api/dashboard/summary?range=${range}`,
+   150→  );
+   151→
+   152→  // Live dashboard: any booking mutation anywhere in the business refreshes
+   153→  // the KPIs and charts, with a subtle ticker of what just happened.
+   154→  const { connected } = useRealtime((msg) => {
+   155→    reload();
+   156→    const verbs: Record<string, string> = {
+   157→      "booking:created": "booked",
+   158→      "booking:cancelled": "cancelled",
+   159→      "booking:rescheduled": "moved",
+   160→      "booking:status": "updated",
+   161→      "booking:updated": "edited",
+   162→    };
+   163→    setLivePing(
+   164→      `${msg.booking.customerName} ${verbs[msg.type] ?? "changed"} ${msg.booking.serviceName} · ${fmtDateTimeUTC(msg.booking.startAt)}`,
+   165→    );
+   166→  });
+   167→
+   168→  async function exportCsv() {
+   169→    setExporting(true);
+   170→    try {
+   171→      await downloadCsv(`/api/dashboard/export?range=${range}`);
+   172→      toast.success("CSV exported.");
+   173→    } catch (err) {
+   174→      toast.error(err instanceof Error ? err.message : "Export failed.");
+   175→    } finally {
+   176→      setExporting(false);
+   177→    }
+   178→  }
+   179→
+   180→  if (error) {
+   181→    return (
+   182→      <Card className="py-0 border-destructive/40">
+   183→        <CardContent className="p-6 text-sm text-destructive">{error}</CardContent>
+   184→      </Card>
+   185→    );
+   186→  }
+   187→
+   188→  const k = data?.kpis;
+   189→
+   190→  return (
+   191→    <div className="flex flex-col gap-6">
+   192→      {/* Toolbar */}
+   193→      <div className="flex flex-wrap items-center justify-between gap-3">
+   194→        <div className="flex flex-wrap items-center gap-2">
+   195→          <Select value={range} onValueChange={setRange}>
+   196→            <SelectTrigger className="w-36" aria-label="Date range">
+   197→              <SelectValue />
+   198→            </SelectTrigger>
+   199→            <SelectContent>
+   200→              <SelectItem value="7">Last 7 days</SelectItem>
+   201→              <SelectItem value="30">Last 30 days</SelectItem>
+   202→              <SelectItem value="90">Last 90 days</SelectItem>
+   203→            </SelectContent>
+   204→          </Select>
+   205→          <span
+   206→            className={cn(
+   207→              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+   208→              connected
+   209→                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+   210→                : "border-muted bg-muted/50 text-muted-foreground",
+   211→            )}
+   212→            title={connected ? "Connected — dashboard refreshes live" : "Offline — reconnecting…"}
+   213→          >
+   214→            <Activity className={cn("size-3.5", connected && "animate-pulse text-emerald-600 dark:text-emerald-400")} />
+   215→            {connected ? "Live" : "Offline"}
+   216→          </span>
+   217→          {livePing && (
+   218→            <span
+   219→              key={livePing}
+   220→              className="animate-in fade-in slide-in-from-left-2 hidden items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground sm:inline-flex"
+   221→            >
+   222→              <span className="size-1.5 rounded-full bg-emerald-500" />
+   223→              {livePing}
+   224→            </span>
+   225→          )}
+   226→        </div>
+   227→        <div className="flex flex-wrap items-center gap-2">
+   228→          <Button variant="outline" onClick={() => setBroadcastOpen(true)}>
+   229→            <Megaphone className="size-4" />
+   230→            Broadcast
+   231→          </Button>
+   232→          <Button variant="outline" onClick={exportCsv} disabled={exporting || loading}>
+   233→            <Download className="size-4" />
+   234→            Export CSV
+   235→          </Button>
+   236→        </div>
+   237→      </div>
+   238→
+   239→      <BroadcastDialog
+   240→        open={broadcastOpen}
+   241→        onOpenChange={setBroadcastOpen}
+   242→      />
+   243→
+   244→      {/* KPI cards */}
+   245→      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+   246→        <Kpi
+   247→          loading={loading}
+   248→          icon={Banknote}
+   249→          label="Revenue (completed)"
+   250→          value={k ? fmtMoney(k.revenue) : undefined}
+   251→          sub={k ? `${fmtMoney(k.expectedRevenue)} expected` : undefined}
+   252→          tone="good"
+   253→          delta={k ? { pct: k.revenueDeltaPct, prev: fmtMoney(k.prevRevenue), label: "vs prev period" } : undefined}
+   254→        />
+   255→        <Kpi
+   256→          loading={loading}
+   257→          icon={CalendarCheck2}
+   258→          label="Bookings"
+   259→          value={k ? String(k.totalBookings) : undefined}
+   260→          sub={k ? `${k.upcomingBookings} upcoming` : undefined}
+   261→          delta={k ? { pct: k.bookingsDeltaPct, prev: String(k.prevTotalBookings), label: "vs prev period" } : undefined}
+   262→        />
+   263→        <Kpi
+   264→          loading={loading}
+   265→          icon={TrendingUp}
+   266→          label="No-show rate"
+   267→          value={k ? `${k.noShowRate}%` : undefined}
+   268→          sub={k ? `${k.cancelRate}% cancelled` : undefined}
+   269→          tone={k && k.noShowRate > 15 ? "bad" : "neutral"}
+   270→          delta={k ? { pct: k.noShowDeltaPct, prev: `${k.prevNoShowRate}%`, label: "vs prev period", goodWhenDown: true } : undefined}
+   271→        />
+   272→        <Kpi
+   273→          loading={loading}
+   274→          icon={Star}
+   275→          label="Avg rating"
+   276→          value={k ? k.avgRating.toFixed(1) : undefined}
+   277→          sub={k ? `${k.activeCustomers} active customers` : undefined}
+   278→          tone="good"
+   279→        />
+   280→      </div>
+   281→
+   282→      {/* Revenue trend — current vs previous period */}
+   283→      <ChartCard
+   284→        title="Revenue trend"
+   285→        description={`Running completed revenue — last ${range} days vs the ${range} days before`}
+   286→        loading={loading}
+   287→        action={
+   288→          k ? (
+   289→            <div className="flex items-center gap-3 text-xs">
+   290→              <span className="inline-flex items-center gap-1.5">
+   291→                <span className="inline-block h-0.5 w-4 rounded-full bg-[var(--chart-1)]" />
+   292→                This period · {fmtMoney(k.revenue)}
+   293→              </span>
+   294→              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+   295→                <span className="inline-block h-0.5 w-4 rounded-full bg-[var(--muted-foreground)] opacity-60" />
+   296→                Previous · {fmtMoney(k.prevRevenue)}
+   297→              </span>
+   298→            </div>
+   299→          ) : undefined
+   300→        }
+   301→      >
+   302→        <RevenueTrendChart data={data?.revenueTrend ?? []} />
+   303→      </ChartCard>
+   304→
+   305→      {/* Charts */}
+   306→      <div className="grid gap-4 lg:grid-cols-2">
+   307→        <ChartCard
+   308→          title="Bookings per day"
+   309→          description={`Non-cancelled bookings, last ${range} days`}
+   310→          loading={loading}
+   311→        >
+   312→          <BookingsPerDayChart data={data?.bookingsPerDay ?? []} />
+   313→        </ChartCard>
+   314→
+   315→        <ChartCard
+   316→          title="Revenue by service"
+   317→          description="Completed bookings only"
+   318→          loading={loading}
+   319→        >
+   320→          <RevenueByServiceChart data={data?.revenueByService ?? []} />
+   321→        </ChartCard>
+   322→
+   323→        <ChartCard
+   324→          title="Peak hours"
+   325→          description="When customers actually book"
+   326→          loading={loading}
+   327→        >
+   328→          <PeakHoursChart data={data?.peakHours ?? []} />
+   329→        </ChartCard>
+   330→
+   331→        <ChartCard
+   332→          title="Status mix"
+   333→          description="Booking outcomes in range"
+   334→          loading={loading}
+   335→        >
+   336→          <StatusDonut data={data?.statusMix ?? []} />
+   337→        </ChartCard>
+   338→      </div>
+   339→
+   340→      {/* Top providers + categories */}
+   341→      <div className="grid gap-4 lg:grid-cols-2">
+   342→        <Card className="py-0">
+   343→          <CardHeader className="border-b">
+   344→            <CardTitle className="flex items-center gap-2 text-base">
+   345→              <Users className="size-4.5 text-primary" /> Top providers
+   346→            </CardTitle>
+   347→            <CardDescription>By completed revenue in range</CardDescription>
+   348→          </CardHeader>
+   349→          <CardContent className="flex flex-col gap-4 p-5">
+   350→            {loading ? (
+   351→              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)
+   352→            ) : (data?.topProviders ?? []).length === 0 ? (
+   353→              <p className="text-sm text-muted-foreground">No bookings yet.</p>
+   354→            ) : (
+   355→              (data?.topProviders ?? []).map((p) => {
+   356→                const max = data!.topProviders[0]!.revenue || 1;
+   357→                return (
+   358→                  <div key={p.providerId} className="flex flex-col gap-1.5">
+   359→                    <div className="flex items-center gap-3">
+   360→                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+   361→                        {initials(p.name)}
+   362→                      </span>
+   363→                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
+   364→                      <span className="text-xs text-muted-foreground">
+   365→                        {p.bookings} bookings · ★ {p.rating.toFixed(1)}
+   366→                      </span>
+   367→                      <span className="text-sm font-bold tabular-nums">{fmtMoney(p.revenue)}</span>
+   368→                    </div>
+   369→                    <Progress value={(p.revenue / max) * 100} className="h-1.5" />
+   370→                  </div>
+   371→                );
+   372→              })
+   373→            )}
+   374→          </CardContent>
+   375→        </Card>
+   376→
+   377→        <Card className="py-0">
+   378→          <CardHeader className="border-b">
+   379→            <CardTitle className="flex items-center gap-2 text-base">
+   380→              <Activity className="size-4.5 text-primary" /> Revenue by category
+   381→            </CardTitle>
+   382→            <CardDescription>Which line of business pays the bills</CardDescription>
+   383→          </CardHeader>
+   384→          <CardContent className="flex flex-col gap-4 p-5">
+   385→            {loading ? (
+   386→              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)
+   387→            ) : (data?.categoryMix ?? []).length === 0 ? (
+   388→              <p className="text-sm text-muted-foreground">No data yet.</p>
+   389→            ) : (
+   390→              (data?.categoryMix ?? []).map((c) => {
+   391→                const max = data!.categoryMix[0]!.revenue || 1;
+   392→                return (
+   393→                  <div key={c.category} className="flex flex-col gap-1.5">
+   394→                    <div className="flex items-center justify-between text-sm">
+   395→                      <span className="font-medium">{c.category}</span>
+   396→                      <span className="text-muted-foreground">
+   397→                        {c.bookings} bookings ·{" "}
+   398→                        <span className="font-bold tabular-nums text-foreground">
+   399→                          {fmtMoney(c.revenue)}
+   400→                        </span>
+   401→                      </span>
+   402→                    </div>
+   403→                    <Progress value={(c.revenue / max) * 100} className="h-1.5" />
+   404→                  </div>
+   405→                );
+   406→              })
+   407→            )}
+   408→          </CardContent>
+   409→        </Card>
+   410→      </div>
+   411→
+   412→      {/* Recent bookings */}
+   413→      <Card className="py-0">
+   414→        <CardHeader className="border-b">
+   415→          <CardTitle className="text-base">Latest bookings</CardTitle>
+   416→          <CardDescription>Most recently created</CardDescription>
+   417→        </CardHeader>
+   418→        <CardContent className="p-0">
+   419→          <div className="overflow-x-auto scrollbar-slim">
+   420→            <table className="table-zebra w-full text-sm">
+   421→              <thead>
+   422→                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+   423→                  <th className="px-5 py-3 font-medium">When</th>
+   424→                  <th className="px-5 py-3 font-medium">Service</th>
+   425→                  <th className="hidden px-5 py-3 font-medium sm:table-cell">Provider</th>
+   426→                  <th className="hidden px-5 py-3 font-medium md:table-cell">Customer</th>
+   427→                  <th className="px-5 py-3 font-medium">Status</th>
+   428→                </tr>
+   429→              </thead>
+   430→              <tbody>
+   431→                {loading
+   432→                  ? Array.from({ length: 5 }).map((_, i) => (
+   433→                      <tr key={i} className="border-b">
+   434→                        <td colSpan={5} className="px-5 py-3">
+   435→                          <Skeleton className="h-5" />
+   436→                        </td>
+   437→                      </tr>
+   438→                    ))
+   439→                  : (data?.recentBookings ?? []).map((b) => (
+   440→                      <tr key={b.id} className="border-b transition-colors last:border-0 hover:bg-muted/40">
+   441→                        <td className="whitespace-nowrap px-5 py-3 tabular-nums">
+   442→                          {fmtDateShortUTC(b.startAt)} {fmtTimeUTC(b.startAt)}
+   443→                        </td>
+   444→                        <td className="px-5 py-3 font-medium">{b.serviceName}</td>
+   445→                        <td className="hidden px-5 py-3 text-muted-foreground sm:table-cell">
+   446→                          {b.providerName}
+   447→                        </td>
+   448→                        <td className="hidden px-5 py-3 text-muted-foreground md:table-cell">
+   449→                          {b.customerName}
+   450→                        </td>
+   451→                        <td className="px-5 py-3">
+   452→                          <StatusBadge status={b.status} />
+   453→                        </td>
+   454→                      </tr>
+   455→                    ))}
+   456→              </tbody>
+   457→            </table>
+   458→          </div>
+   459→        </CardContent>
+   460→      </Card>
+   461→    </div>
+   462→  );
+   463→}
+   464→
+   465→function Kpi({
+   466→  icon: Icon,
+   467→  label,
+   468→  value,
+   469→  sub,
+   470→  tone,
+   471→  delta,
+   472→  loading,
+   473→}: {
+   474→  icon: typeof Banknote;
+   475→  label: string;
+   476→  value?: string;
+   477→  sub?: string;
+   478→  tone?: "good" | "bad" | "neutral";
+   479→  /** Previous-period comparison pill. */
+   480→  delta?: {
+   481→    pct: number | null;
+   482→    prev: string;
+   483→    label: string;
+   484→    /** For metrics where a decrease is good (e.g. no-show rate). */
+   485→    goodWhenDown?: boolean;
+   486→  };
+   487→  loading?: boolean;
+   488→}) {
+   489→  const deltaTone =
+   490→    delta?.pct == null
+   491→      ? null
+   492→      : delta.pct === 0
+   493→        ? "flat"
+   494→        : (delta.pct > 0) !== (delta.goodWhenDown ?? false)
+   495→          ? "up"
+   496→          : "down";
+   497→
+   498→  return (
+   499→    <Card className="py-0 transition-all duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/15">
+   500→      <CardContent className="p-4">
+   501→        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   502→          <Icon className="size-3.5" />
+   503→          {label}
+   504→        </div>
+   505→        {loading || value === undefined ? (
+   506→          <Skeleton className="mt-2 h-8 w-24" />
+   507→        ) : (
+   508→          <p
+   509→            className={cn(
+   510→              "mt-1 text-2xl font-bold leading-tight tabular-nums",
+   511→              tone === "good" && "text-emerald-700 dark:text-emerald-400",
+   512→              tone === "bad" && "text-rose-700 dark:text-rose-400",
+   513→            )}
+   514→          >
+   515→            {value}
+   516→          </p>
+   517→        )}
+   518→        {sub && !loading && (
+   519→          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+   520→            {tone === "good" && <ArrowUpRight className="size-3" />}
+   521→            {tone === "bad" && <ArrowDownRight className="size-3" />}
+   522→            {sub}
+   523→          </p>
+   524→        )}
+   525→        {delta && !loading && (
+   526→          <div className="mt-2 flex items-center gap-1.5">
+   527→            <span
+   528→              className={cn(
+   529→                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+   530→                deltaTone === "up" &&
+   531→                  "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
+   532→                deltaTone === "down" &&
+   533→                  "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+   534→                (deltaTone === "flat" || deltaTone === null) &&
+   535→                  "bg-muted text-muted-foreground",
+   536→              )}
+   537→              title={`${delta.label}: was ${delta.prev}`}
+   538→            >
+   539→              {deltaTone === "up" && <ArrowUpRight className="size-3" />}
+   540→              {deltaTone === "down" && <ArrowDownRight className="size-3" />}
+   541→              {delta.pct == null ? "n/a" : `${delta.pct > 0 ? "+" : ""}${delta.pct}%`}
+   542→            </span>
+   543→            <span className="text-[10px] text-muted-foreground">{delta.label}</span>
+   544→          </div>
+   545→        )}
+   546→      </CardContent>
+   547→    </Card>
+   548→  );
+   549→}
+   550→
+   551→function ChartCard({
+   552→  title,
+   553→  description,
+   554→  children,
+   555→  loading,
+   556→  className,
+   557→  action,
+   558→}: {
+   559→  title: string;
+   560→  description: string;
+   561→  children: React.ReactNode;
+   562→  loading: boolean;
+   563→  className?: string;
+   564→  action?: React.ReactNode;
+   565→}) {
+   566→  return (
+   567→    <Card className={cn("min-w-0 py-0 transition-shadow duration-200 hover:shadow-md", className)}>
+   568→      <CardHeader className="border-b">
+   569→        <div className="flex flex-wrap items-center justify-between gap-2">
+   570→          <CardTitle className="text-base">{title}</CardTitle>
+   571→          {action}
+   572→        </div>
+   573→        <CardDescription>{description}</CardDescription>
+   574→      </CardHeader>
+   575→      <CardContent className="min-w-0 p-4 pt-4">
+   576→        {loading ? <Skeleton className="h-56 w-full" /> : children}
+   577→      </CardContent>
+   578→    </Card>
+   579→  );
+   580→}
+   581→
+   582→function RevenueTrendChart({ data }: { data: DashboardDTO["revenueTrend"] }) {
+   583→  const config = {
+   584→    current: { label: "This period", color: "var(--chart-1)" },
+   585→    previous: { label: "Previous period", color: "var(--muted-foreground)" },
+   586→  } satisfies ChartConfig;
+   587→
+   588→  return (
+   589→    <ChartContainer config={config} className="h-64 w-full">
+   590→      <LineChart data={data} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
+   591→        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+   592→        <XAxis
+   593→          dataKey="label"
+   594→          tickLine={false}
+   595→          axisLine={false}
+   596→          tickMargin={8}
+   597→          minTickGap={32}
+   598→        />
+   599→        <YAxis
+   600→          tickLine={false}
+   601→          axisLine={false}
+   602→          tickMargin={4}
+   603→          width={52}
+   604→          tickFormatter={(v: number) =>
+   605→            v >= 1000 ? `£${Math.round(v / 100) / 10}k` : `£${v}`
+   606→          }
+   607→        />
+   608→        <ChartTooltip
+   609→          content={
+   610→            <ChartTooltipContent
+   611→              indicator="line"
+   612→              formatter={(v) => fmtMoney(Number(v))}
+   613→            />
+   614→          }
+   615→        />
+   616→        <Line
+   617→          dataKey="previous"
+   618→          type="monotone"
+   619→          stroke="var(--color-previous)"
+   620→          strokeWidth={1.5}
+   621→          strokeDasharray="5 4"
+   622→          dot={false}
+   623→          activeDot={{ r: 3, strokeWidth: 0 }}
+   624→        />
+   625→        <Line
+   626→          dataKey="current"
+   627→          type="monotone"
+   628→          stroke="var(--color-current)"
+   629→          strokeWidth={2.5}
+   630→          dot={false}
+   631→          activeDot={{ r: 4, strokeWidth: 0 }}
+   632→        />
+   633→      </LineChart>
+   634→    </ChartContainer>
+   635→  );
+   636→}
+   637→
+   638→function BookingsPerDayChart({ data }: { data: DashboardDTO["bookingsPerDay"] }) {
+   639→  const config = {
+   640→    bookings: { label: "Bookings", color: "var(--chart-1)" },
+   641→  } satisfies ChartConfig;
+   642→
+   643→  return (
+   644→    <ChartContainer config={config} className="h-56 w-full">
+   645→      <AreaChart data={data} margin={{ left: -8, right: 8, top: 8 }}>
+   646→        <defs>
+   647→          <linearGradient id="fillBookings" x1="0" y1="0" x2="0" y2="1">
+   648→            <stop offset="5%" stopColor="var(--color-bookings)" stopOpacity={0.7} />
+   649→            <stop offset="95%" stopColor="var(--color-bookings)" stopOpacity={0.05} />
+   650→          </linearGradient>
+   651→        </defs>
+   652→        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+   653→        <XAxis
+   654→          dataKey="label"
+   655→          tickLine={false}
+   656→          axisLine={false}
+   657→          tickMargin={8}
+   658→          minTickGap={24}
+   659→        />
+   660→        <YAxis tickLine={false} axisLine={false} tickMargin={4} width={36} allowDecimals={false} />
+   661→        <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+   662→        <Area
+   663→          dataKey="bookings"
+   664→          type="monotone"
+   665→          stroke="var(--color-bookings)"
+   666→          strokeWidth={2}
+   667→          fill="url(#fillBookings)"
+   668→        />
+   669→      </AreaChart>
+   670→    </ChartContainer>
+   671→  );
+   672→}
+   673→
+   674→function RevenueByServiceChart({ data }: { data: DashboardDTO["revenueByService"] }) {
+   675→  const config = {
+   676→    revenue: { label: "Revenue", color: "var(--chart-2)" },
+   677→  } satisfies ChartConfig;
+   678→
+   679→  return (
+   680→    <ChartContainer config={config} className="h-56 w-full">
+   681→      <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
+   682→        <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+   683→        <XAxis type="number" hide />
+   684→        <YAxis
+   685→          dataKey="service"
+   686→          type="category"
+   687→          tickLine={false}
+   688→          axisLine={false}
+   689→          width={150}
+   690→          tick={{ fontSize: 11 }}
+   691→        />
+   692→        <ChartTooltip
+   693→          content={<ChartTooltipContent indicator="line" formatter={(v) => fmtMoney(Number(v))} />}
+   694→        />
+   695→        <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[0, 4, 4, 0]} barSize={16} />
+   696→      </BarChart>
+   697→    </ChartContainer>
+   698→  );
+   699→}
+   700→
+   701→function PeakHoursChart({ data }: { data: DashboardDTO["peakHours"] }) {
+   702→  const config = {
+   703→    bookings: { label: "Bookings", color: "var(--chart-4)" },
+   704→  } satisfies ChartConfig;
+   705→
+   706→  return (
+   707→    <ChartContainer config={config} className="h-56 w-full">
+   708→      <BarChart data={data} margin={{ left: -8, right: 8, top: 8 }}>
+   709→        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+   710→        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={1} />
+   711→        <YAxis tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+   712→        <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+   713→        <Bar dataKey="bookings" fill="var(--color-bookings)" radius={[4, 4, 0, 0]} />
+   714→      </BarChart>
+   715→    </ChartContainer>
+   716→  );
+   717→}
+   718→
+   719→function StatusDonut({ data }: { data: DashboardDTO["statusMix"] }) {
+   720→  const config = Object.fromEntries(
+   721→    data.map((d) => [
+   722→      d.status,
+   723→      { label: statusMeta(d.status).label, color: STATUS_COLORS[d.status] },
+   724→    ]),
+   725→  ) satisfies ChartConfig;
+   726→
+   727→  const total = data.reduce((s, d) => s + d.count, 0);
+   728→
+   729→  return (
+   730→    <div className="flex h-56 items-center justify-center">
+   731→      <ChartContainer config={config} className="aspect-square h-full justify-center">
+   732→        <PieChart>
+   733→          <ChartTooltip content={<ChartTooltipContent nameKey="status" hideLabel />} />
+   734→          <Pie
+   735→            data={data}
+   736→            dataKey="count"
+   737→            nameKey="status"
+   738→            innerRadius={54}
+   739→            outerRadius={82}
+   740→            paddingAngle={3}
+   741→            strokeWidth={2}
+   742→          >
+   743→            {data.map((d) => (
+   744→              <Cell key={d.status} fill={STATUS_COLORS[d.status]} />
+   745→            ))}
+   746→          </Pie>
+   747→          <ChartLegend content={<ChartLegendContent nameKey="status" />} className="flex-wrap" />
+   748→        </PieChart>
+   749→      </ChartContainer>
+   750→      <div className="flex flex-col items-center">
+   751→        <span className="text-2xl font-bold tabular-nums">{total}</span>
+   752→        <span className="text-xs text-muted-foreground">total</span>
+   753→      </div>
+   754→    </div>
+   755→  );
+   756→}
+   757→
+   758→/**
+   759→ * Admin broadcast composer — one message, every bell. Audience choices:
+   760→ * everyone, customers only, or just customers with upcoming bookings.
+   761→ * Each recipient gets their own outbox row + realtime push.
+   762→ */
+   763→function BroadcastDialog({
+   764→  open,
+   765→  onOpenChange,
+   766→}: {
+   767→  open: boolean;
+   768→  onOpenChange: (v: boolean) => void;
+   769→}) {
+   770→  const [audience, setAudience] = useState<"ALL" | "CUSTOMERS" | "UPCOMING">("CUSTOMERS");
+   771→  const [title, setTitle] = useState("");
+   772→  const [body, setBody] = useState("");
+   773→  const [sending, setSending] = useState(false);
+   774→
+   775→  const audienceHint: Record<string, string> = {
+   776→    ALL: "Every account — owners, staff and customers.",
+   777→    CUSTOMERS: "Customer accounts only — the usual choice for promos and notices.",
+   778→    UPCOMING: "Only customers with a pending or confirmed future booking.",
+   779→  };
+   780→
+   781→  async function send(e: React.FormEvent) {
+   782→    e.preventDefault();
+   783→    if (title.trim().length < 3 || body.trim().length < 5) {
+   784→      toast.error("Give the message a title (3+ chars) and a body (5+ chars).");
+   785→      return;
+   786→    }
+   787→    setSending(true);
+   788→    try {
+   789→      const res = await apiFetch<{ sent: number }>("/api/admin/broadcast", {
+   790→        method: "POST",
+   791→        body: { title: title.trim(), body: body.trim(), audience },
+   792→      });
+   793→      toast.success("Broadcast sent.", {
+   794→        description: `${res.sent} recipient${res.sent === 1 ? "" : "s"} got the message in their bell.`,
+   795→      });
+   796→      setTitle("");
+   797→      setBody("");
+   798→      setAudience("CUSTOMERS");
+   799→      onOpenChange(false);
+   800→    } catch (err) {
+   801→      toast.error(err instanceof Error ? err.message : "Could not send the broadcast.");
+   802→    } finally {
+   803→      setSending(false);
+   804→    }
+   805→  }
+   806→
+   807→  return (
+   808→    <Dialog open={open} onOpenChange={onOpenChange}>
+   809→      <DialogContent className="sm:max-w-md">
+   810→        <DialogHeader>
+   811→          <DialogTitle className="flex items-center gap-2">
+   812→            <Megaphone className="size-5 text-primary" />
+   813→            Send a broadcast
+   814→          </DialogTitle>
+   815→          <DialogDescription>
+   816→            Lands instantly in every recipient&apos;s notification bell —
+   817→            and in the mock email outbox.
+   818→          </DialogDescription>
+   819→        </DialogHeader>
+   820→
+   821→        <form className="flex flex-col gap-4" onSubmit={send}>
+   822→          <div className="flex flex-col gap-1.5">
+   823→            <Label>Audience</Label>
+   824→            <Select value={audience} onValueChange={(v) => setAudience(v as typeof audience)}>
+   825→              <SelectTrigger aria-label="Broadcast audience">
+   826→                <SelectValue />
+   827→              </SelectTrigger>
+   828→              <SelectContent>
+   829→                <SelectItem value="ALL">Everyone</SelectItem>
+   830→                <SelectItem value="CUSTOMERS">All customers</SelectItem>
+   831→                <SelectItem value="UPCOMING">Customers with upcoming bookings</SelectItem>
+   832→              </SelectContent>
+   833→            </Select>
+   834→            <p className="text-xs text-muted-foreground">{audienceHint[audience]}</p>
+   835→          </div>
+   836→
+   837→          <div className="flex flex-col gap-1.5">
+   838→            <div className="flex items-center justify-between">
+   839→              <Label htmlFor="bc-title">Title</Label>
+   840→              <span className="text-xs tabular-nums text-muted-foreground">
+   841→                {title.length}/80
+   842→              </span>
+   843→            </div>
+   844→            <Input
+   845→              id="bc-title"
+   846→              required
+   847→              minLength={3}
+   848→              maxLength={80}
+   849→              value={title}
+   850→              onChange={(e) => setTitle(e.target.value)}
+   851→              placeholder="October offer — 20% off hygiene visits"
+   852→            />
+   853→          </div>
+   854→
+   855→          <div className="flex flex-col gap-1.5">
+   856→            <div className="flex items-center justify-between">
+   857→              <Label htmlFor="bc-body">Message</Label>
+   858→              <span className="text-xs tabular-nums text-muted-foreground">
+   859→                {body.length}/500
+   860→              </span>
+   861→            </div>
+   862→            <Textarea
+   863→              id="bc-body"
+   864→              required
+   865→              minLength={5}
+   866→              maxLength={500}
+   867→              value={body}
+   868→              onChange={(e) => setBody(e.target.value)}
+   869→              placeholder="Mention the promo, when it runs and how to book…"
+   870→              className="min-h-28"
+   871→            />
+   872→          </div>
+   873→
+   874→          <DialogFooter>
+   875→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+   876→              Cancel
+   877→            </Button>
+   878→            <Button type="submit" className="press" disabled={sending}>
+   879→              {sending && <Loader2 className="size-4 animate-spin" />}
+   880→              <Megaphone className="size-4" />
+   881→              Send broadcast
+   882→            </Button>
+   883→          </DialogFooter>
+   884→        </form>
+   885→      </DialogContent>
+   886→    </Dialog>
+   887→  );
+   888→}
+   889→

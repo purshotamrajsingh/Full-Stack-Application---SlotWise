@@ -29,6 +29,8 @@ export function ServiceCard({ service, onBook, onFavoriteChange, className }: Se
   const next = service.nextAvailableAt;
 
   const [isFav, setIsFav] = useState(service.isFavorite ?? false);
+  /** Bumped on every toggle — remounts the Heart svg so .heart-pop replays. */
+  const [popKey, setPopKey] = useState(0);
   const pendingRef = useRef(false);
 
   async function toggleFavorite() {
@@ -38,6 +40,7 @@ export function ServiceCard({ service, onBook, onFavoriteChange, className }: Se
 
     // Optimistic flip + tell the parent (filter chip / count) immediately.
     setIsFav(nextFav);
+    setPopKey((k) => k + 1);
     onFavoriteChange?.(service.id, nextFav);
 
     try {
@@ -95,12 +98,17 @@ export function ServiceCard({ service, onBook, onFavoriteChange, className }: Se
                 className={cn(
                   "inline-flex size-8 items-center justify-center rounded-full transition-all duration-150 hover:scale-110 active:scale-95",
                   isFav
-                    ? "text-rose-500"
+                    ? "text-rose-500 dark:text-rose-400"
                     : "text-muted-foreground hover:bg-muted hover:text-rose-500",
                 )}
               >
                 <Heart
-                  className={cn("size-4", isFav && "fill-rose-500 text-rose-500")}
+                  key={popKey}
+                  className={cn(
+                    "size-4",
+                    popKey > 0 && "heart-pop",
+                    isFav && "fill-rose-500 text-rose-500 dark:fill-rose-400 dark:text-rose-400",
+                  )}
                   aria-hidden="true"
                 />
               </button>

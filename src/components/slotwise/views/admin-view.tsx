@@ -80,6 +80,9 @@ const STATUS_COLORS: Record<string, string> = {
   NO_SHOW: "var(--chart-5)",
 };
 
+/** Analysis windows offered by the dashboard toolbar segmented control. */
+const RANGE_OPTIONS = ["7", "30", "90"] as const;
+
 export function AdminView() {
   const tab = useUIStore((s) => s.adminTab);
   const setTab = useUIStore((s) => s.setAdminTab);
@@ -192,16 +195,35 @@ function OverviewSection() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={range} onValueChange={setRange}>
-            <SelectTrigger className="w-36" aria-label="Date range">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="7">Last 7 days</SelectItem>
-              <SelectItem value="30">Last 30 days</SelectItem>
-              <SelectItem value="90">Last 90 days</SelectItem>
-            </SelectContent>
-          </Select>
+          <span className="text-sm font-medium text-muted-foreground">
+            Last {range} days
+          </span>
+          {/* Compact segmented control (same pattern as Full day/Partial) —
+              switching refetches the summary; KPI prev-period deltas and every
+              series below are range-driven, and the CSV export follows along. */}
+          <div
+            className="flex rounded-lg border bg-background p-0.5"
+            role="tablist"
+            aria-label="Analysis range"
+          >
+            {RANGE_OPTIONS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="tab"
+                aria-selected={range === r}
+                onClick={() => setRange(r)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors",
+                  range === r
+                    ? "bg-secondary text-secondary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",

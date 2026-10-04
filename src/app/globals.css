@@ -299,7 +299,8 @@
   .animate-float,
   .text-gradient,
   .shimmer::after,
-  .view-enter {
+  .view-enter,
+  .heart-pop {
     animation: none !important;
   }
   .card-lift,
@@ -317,4 +318,21 @@
   outline: 2px solid var(--primary);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
+}
+
+/* Favorites heart "pop" — one-shot scale bounce whenever the heart toggles.
+   Re-triggered by remounting the lucide <svg> via a key change in
+   service-card.tsx (the class is absent on first mount, so page loads stay
+   still). Guarded by the prefers-reduced-motion block above. */
+.heart-pop {
+  animation: heart-pop 300ms ease-out;
+}
+@keyframes heart-pop {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.35);
+  }
 }

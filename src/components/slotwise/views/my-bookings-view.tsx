@@ -13,6 +13,7 @@ import {
   Loader2,
   MessageSquareHeart,
   PencilLine,
+  Reply,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -653,37 +654,50 @@ function BookingCard({
               </p>
             )}
             {booking.review && (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <StarRating value={booking.review.rating} />
-                {booking.review.comment && (
-                  <span className="line-clamp-1 text-xs text-muted-foreground">
-                    “{booking.review.comment}”
-                  </span>
-                )}
-                {reviewEditable && (
-                  <span className="inline-flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-                      onClick={onEditReview}
-                      disabled={busy}
-                      title="Edit your review"
-                    >
-                      <PencilLine className="size-3" /> Edit
-                      <span className="text-[10px] text-muted-foreground/70">{reviewMinsLeft}m</span>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
-                      onClick={onDeleteReview}
-                      disabled={busy}
-                      title="Delete your review"
-                    >
-                      <Trash2 className="size-3" /> Delete
-                    </Button>
-                  </span>
+              <div className="mt-2 flex flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StarRating value={booking.review.rating} />
+                  {booking.review.comment && (
+                    <span className="line-clamp-1 text-xs text-muted-foreground">
+                      “{booking.review.comment}”
+                    </span>
+                  )}
+                  {reviewEditable && (
+                    <span className="inline-flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+                        onClick={onEditReview}
+                        disabled={busy}
+                        title="Edit your review"
+                      >
+                        <PencilLine className="size-3" /> Edit
+                        <span className="text-[10px] text-muted-foreground/70">{reviewMinsLeft}m</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+                        onClick={onDeleteReview}
+                        disabled={busy}
+                        title="Delete your review"
+                      >
+                        <Trash2 className="size-3" /> Delete
+                      </Button>
+                    </span>
+                  )}
+                </div>
+                {booking.review.reply && (
+                  <div className="rounded-lg border-l-2 border-primary/40 bg-muted/60 px-3 py-2">
+                    <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Reply className="size-3 shrink-0 text-primary" />
+                      {booking.review.repliedByName ?? booking.providerName} replied
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                      {booking.review.reply}
+                    </p>
+                  </div>
                 )}
               </div>
             )}

@@ -117,6 +117,18 @@ export interface ReviewDTO {
   comment: string | null;
   createdAt: string;
   authorName: string;
+  /** Business reply (null until the provider or an admin responds). */
+  reply?: string | null;
+  repliedAt?: string | null;
+  repliedByName?: string | null;
+}
+
+/** A review on one of the provider's bookings, with its business reply —
+ *  powers the provider portal's Reviews tab and the reply endpoints. */
+export interface ProviderReviewItem extends ReviewDTO {
+  serviceName: string;
+  serviceId: string;
+  bookingStartAt: string;
 }
 
 export interface BookingDTO {
@@ -154,6 +166,10 @@ export interface ProviderReviewEntry {
   createdAt: string;
   authorName: string;
   serviceName: string;
+  /** Business reply shown nested under the review (null when unanswered). */
+  reply?: string | null;
+  repliedAt?: string | null;
+  repliedByName?: string | null;
 }
 
 /** Full public profile shown in the provider dialog (email omitted unless admin). */
@@ -186,6 +202,10 @@ export interface TestimonialEntry {
   authorName: string;
   serviceName: string;
   providerName: string;
+  /** Business reply (landing/profile reply bubbles; null when unanswered). */
+  reply?: string | null;
+  repliedAt?: string | null;
+  repliedByName?: string | null;
 }
 
 export interface AuthResponse {

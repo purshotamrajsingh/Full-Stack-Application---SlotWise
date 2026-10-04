@@ -326,6 +326,60 @@ async function main() {
   }
   console.log(`Created ${reviewCount} reviews.`);
 
+  // ── Provider replies (business responses on recent reviews) ────────────
+  // Demo data for the Reviews tab + customer-facing reply bubbles: each
+  // target is the provider's most recent commented review matching the
+  // rating filter (skipped when already answered).
+  const replyTargets: {
+    email: string;
+    ratingFilter: { gte?: number; lte?: number };
+    reply: string;
+  }[] = [
+    {
+      email: "priya@slotwise.test",
+      ratingFilter: { gte: 5 },
+      reply:
+        "Thank you for the lovely review — it's a pleasure working with you. See you at your next session!",
+    },
+    {
+      email: "priya@slotwise.test",
+      ratingFilter: { lte: 4 },
+      reply:
+        "Thanks for the honest feedback — really glad the session helped. If there's anything I can fine-tune for your next visit, just let me know.",
+    },
+    {
+      email: "marco@slotwise.test",
+      ratingFilter: { gte: 5 },
+      reply:
+        "So glad you left the chair happy — thanks for taking the time to review. See you next time!",
+    },
+  ];
+  let replyCount = 0;
+  for (const spec of replyTargets) {
+    const provider = providers[spec.email];
+    if (!provider) continue;
+    const target = await db.review.findFirst({
+      where: {
+        booking: { providerId: provider.id },
+        comment: { not: null },
+        rating: spec.ratingFilter,
+        reply: null,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!target) continue;
+    await db.review.update({
+      where: { id: target.id },
+      data: {
+        reply: spec.reply,
+        repliedAt: new Date(Math.min(target.createdAt.getTime() + DAY, Date.now())),
+        repliedById: provider.userId,
+      },
+    });
+    replyCount++;
+  }
+  console.log(`Created ${replyCount} provider replies.`);
+
   // ── Waitlist demo entries (customers watching taken future slots) ────────
   const futureTaken = await db.booking.findMany({
     where: {
@@ -386,6 +440,7 @@ async function main() {
     services: await db.service.count(),
     bookings: await db.booking.count(),
     reviews: await db.review.count(),
+    reviewReplies: await db.review.count({ where: { reply: { not: null } } }),
     waitlist: await db.waitlist.count(),
     favorites: await db.favorite.count(),
   };

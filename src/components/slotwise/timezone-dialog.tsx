@@ -71,7 +71,7 @@ export function TimezoneDialog({
 }) {
   const user = useAuthStore((s) => s.user);
   const updateTimezone = useAuthStore((s) => s.updateTimezone);
-  const browserTz = useMemo(browserTimezone, []);
+  const browserTz = useMemo(() => browserTimezone(), []);
   const [selected, setSelected] = useState<string>(user?.timezone ?? "UTC");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");

@@ -182,7 +182,7 @@ httpServer.listen(PORT, () => {
 });
 
 // ---------------------------------------------------------------------------
-// One-shot dev-server bootstrap. (r7 re-arm 2026-10-04T12:15)
+// One-shot dev-server bootstrap. (r8 re-arm 2026-10-04T12:36 — Review reply fields)
 // The sandbox gateway kills any process spawned during an agent Bash call, but
 // this hub is a boot-time orphan and its children survive. Drop a marker file
 // at .zscripts/dev-server.stamp, then touch this file (hot reload) to have the

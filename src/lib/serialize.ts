@@ -6,7 +6,12 @@ export const bookingInclude = {
   // user.id is needed to target realtime rooms (rooms are keyed by user id).
   provider: { include: { user: { select: { id: true, name: true } } } },
   customer: { select: { id: true, name: true } },
-  review: { include: { author: { select: { name: true } } } },
+  review: {
+    include: {
+      author: { select: { name: true } },
+      repliedBy: { select: { name: true } },
+    },
+  },
 } satisfies Prisma.BookingInclude;
 
 export type BookingFull = Prisma.BookingGetPayload<{
@@ -22,6 +27,9 @@ export function toBookingDTO(b: BookingFull): BookingDTO {
         comment: b.review.comment,
         createdAt: b.review.createdAt.toISOString(),
         authorName: b.review.author.name,
+        reply: b.review.reply,
+        repliedAt: b.review.repliedAt ? b.review.repliedAt.toISOString() : null,
+        repliedByName: b.review.repliedBy ? b.review.repliedBy.name : null,
       }
     : null;
 

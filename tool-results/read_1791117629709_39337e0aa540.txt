@@ -1,0 +1,760 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useState } from "react";
+     4→import {
+     5→  Bell,
+     6→  BellRing,
+     7→  CalendarCheck,
+     8→  CalendarPlus,
+     9→  CalendarX2,
+    10→  CalendarRange,
+    11→  CheckCircle2,
+    12→  Clock,
+    13→  Loader2,
+    14→  MessageSquareHeart,
+    15→  PencilLine,
+    16→  RotateCcw,
+    17→  Sparkles,
+    18→  Trash2,
+    19→  Wallet,
+    20→  XCircle,
+    21→} from "lucide-react";
+    22→import { toast } from "sonner";
+    23→import { Button } from "@/components/ui/button";
+    24→import { Card, CardContent } from "@/components/ui/card";
+    25→import { Skeleton } from "@/components/ui/skeleton";
+    26→import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    27→import { Textarea } from "@/components/ui/textarea";
+    28→import {
+    29→  Popover,
+    30→  PopoverContent,
+    31→  PopoverTrigger,
+    32→} from "@/components/ui/popover";
+    33→import {
+    34→  AlertDialog,
+    35→  AlertDialogAction,
+    36→  AlertDialogCancel,
+    37→  AlertDialogContent,
+    38→  AlertDialogDescription,
+    39→  AlertDialogFooter,
+    40→  AlertDialogHeader,
+    41→  AlertDialogTitle,
+    42→} from "@/components/ui/alert-dialog";
+    43→import { StatusBadge } from "@/components/slotwise/status-badge";
+    44→import { StarRating } from "@/components/slotwise/star-rating";
+    45→import { EmptyState } from "@/components/slotwise/empty-state";
+    46→import { ReviewDialog } from "@/components/slotwise/review-dialog";
+    47→import { useUIStore } from "@/store/ui-store";
+    48→import { useAuthStore } from "@/store/auth-store";
+    49→import { useApiQuery } from "@/hooks/use-api-query";
+    50→import { useRealtime, useNotifications } from "@/hooks/use-realtime";
+    51→import { apiFetch, downloadIcs } from "@/lib/client-api";
+    52→import type { BookingDTO, WaitlistDTO } from "@/lib/types";
+    53→import { addDaysKey, fmtDateUTC, fmtDuration, fmtMoney, fmtTimeUTC, isPast, todayKey } from "@/lib/format";
+    54→import { cn } from "@/lib/utils";
+    55→
+    56→type Tab = "upcoming" | "past" | "cancelled" | "waitlist";
+    57→
+    58→export function MyBookingsView() {
+    59→  const openReschedule = useUIStore((s) => s.openReschedule);
+    60→  const user = useAuthStore((s) => s.user);
+    61→  const [tab, setTab] = useState<Tab>("upcoming");
+    62→  const [cancelTarget, setCancelTarget] = useState<BookingDTO | null>(null);
+    63→  const [reviewTarget, setReviewTarget] = useState<BookingDTO | null>(null);
+    64→  const [reviewEditMode, setReviewEditMode] = useState(false);
+    65→  const [deleteReviewTarget, setDeleteReviewTarget] = useState<BookingDTO | null>(null);
+    66→  const [busyId, setBusyId] = useState<string | null>(null);
+    67→
+    68→  const { data, loading, error, reload } = useApiQuery<{ items: BookingDTO[] }>(
+    69→    "/api/bookings?sort=date_desc",
+    70→  );
+    71→  const {
+    72→    data: wlData,
+    73→    loading: wlLoading,
+    74→    reload: wlReload,
+    75→  } = useApiQuery<{ items: WaitlistDTO[] }>("/api/waitlist");
+    76→  const wlItems = wlData?.items ?? [];
+    77→
+    78→  // Live updates: when the provider confirms/completes one of this user's
+    79→  // bookings (or a reschedule lands), refresh the list and say what changed.
+    80→  useRealtime((msg) => {
+    81→    if (msg.booking.customerId !== user?.id) return;
+    82→    reload();
+    83→    if (msg.actorId === user?.id) return;
+    84→    if (msg.type === "booking:status") {
+    85→      toast.info(`Booking ${msg.booking.status.toLowerCase()} — ${msg.booking.serviceName}`, {
+    86→        description: `${msg.booking.providerName} · ${fmtDateUTC(msg.booking.startAt)} ${fmtTimeUTC(msg.booking.startAt)}`,
+    87→      });
+    88→    }
+    89→  });
+    90→
+    91→  // A watched slot just freed up — refresh the waitlist tab so the entry
+    92→  // flips to "alerted" while the bell toast is still on screen.
+    93→  useNotifications((msg) => {
+    94→    if (msg.type === "waitlist_opened") wlReload();
+    95→  });
+    96→
+    97→  // Remove a review (only offered inside the 15-minute edit window).
+    98→  async function deleteReview() {
+    99→    if (!deleteReviewTarget?.review) return;
+   100→    setBusyId(deleteReviewTarget.id);
+   101→    try {
+   102→      await apiFetch(`/api/reviews/${deleteReviewTarget.review.id}`, { method: "DELETE" });
+   103→      toast.success("Review removed.");
+   104→      setDeleteReviewTarget(null);
+   105→      reload();
+   106→    } catch (err) {
+   107→      toast.error(err instanceof Error ? err.message : "Could not remove review.");
+   108→    } finally {
+   109→      setBusyId(null);
+   110→    }
+   111→  }
+   112→
+   113→  const items = data?.items ?? [];
+   114→
+   115→  const grouped = useMemo(() => {
+   116→    const upcoming: BookingDTO[] = [];
+   117→    const past: BookingDTO[] = [];
+   118→    const cancelled: BookingDTO[] = [];
+   119→    for (const b of items) {
+   120→      if (b.status === "CANCELLED" || b.status === "NO_SHOW") cancelled.push(b);
+   121→      else if (isPast(b.startAt) || b.status === "COMPLETED") past.push(b);
+   122→      else upcoming.push(b);
+   123→    }
+   124→    upcoming.sort((a, b) => a.startAt.localeCompare(b.startAt));
+   125→    past.sort((a, b) => b.startAt.localeCompare(a.startAt));
+   126→    return { upcoming, past, cancelled };
+   127→  }, [items]);
+   128→
+   129→  async function cancelBooking(booking: BookingDTO) {
+   130→    setBusyId(booking.id);
+   131→    try {
+   132→      await apiFetch(`/api/bookings/${booking.id}`, { method: "DELETE" });
+   133→      toast.success("Booking cancelled.");
+   134→      reload();
+   135→    } catch (err) {
+   136→      toast.error(err instanceof Error ? err.message : "Could not cancel.");
+   137→    } finally {
+   138→      setBusyId(null);
+   139→      setCancelTarget(null);
+   140→    }
+   141→  }
+   142→
+   143→  const lists: Record<Exclude<Tab, "waitlist">, BookingDTO[]> = grouped;
+   144→
+   145→  // Customer lifetime stats (all computed client-side from the booking list).
+   146→  const stats = useMemo(() => {
+   147→    const completed = items.filter((b) => b.status === "COMPLETED");
+   148→    const spend = completed.reduce((s, b) => s + b.price, 0);
+   149→    const next = grouped.upcoming[0] ?? null;
+   150→    let countdown: string | null = null;
+   151→    if (next) {
+   152→      const days = Math.ceil(
+   153→        (new Date(next.startAt).getTime() - Date.now()) / 86_400_000,
+   154→      );
+   155→      countdown =
+   156→        days <= 0
+   157→          ? "today"
+   158→          : days === 1
+   159→            ? "tomorrow"
+   160→            : `in ${days} days`;
+   161→    }
+   162→    return {
+   163→      spend,
+   164→      visits: completed.length,
+   165→      next,
+   166→      countdown,
+   167→    };
+   168→  }, [items, grouped.upcoming]);
+   169→
+   170→  const emptyCopy: Record<Tab, { title: string; description: string }> = {
+   171→    upcoming: {
+   172→      title: "No upcoming bookings",
+   173→      description: "Browse services and grab your next slot in three clicks.",
+   174→    },
+   175→    past: {
+   176→      title: "No past appointments yet",
+   177→      description: "Completed visits and their reviews will appear here.",
+   178→    },
+   179→    cancelled: {
+   180→      title: "Nothing cancelled",
+   181→      description: "Cancelled and missed appointments would show up here.",
+   182→    },
+   183→    waitlist: {
+   184→      title: "Not watching any slots",
+   185→      description:
+   186→        "Tap the little bell on a taken slot in the booking calendar — we'll ping you the moment it frees up.",
+   187→    },
+   188→  };
+   189→
+   190→  return (
+   191→    <div className="view-enter mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+   192→      <div className="mb-6">
+   193→        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">My bookings</h1>
+   194→        <p className="mt-1 text-muted-foreground">
+   195→          Reschedule, cancel or review — all in one place.
+   196→        </p>
+   197→      </div>
+   198→
+   199→      {/* Lifetime stats */}
+   200→      {loading ? (
+   201→        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+   202→          {Array.from({ length: 4 }).map((_, i) => (
+   203→            <Skeleton key={i} className="h-20 rounded-xl" />
+   204→          ))}
+   205→        </div>
+   206→      ) : items.length > 0 ? (
+   207→        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+   208→          <CustomerStat
+   209→            icon={Sparkles}
+   210→            label="Next visit"
+   211→            value={stats.next ? stats.countdown ?? "soon" : "—"}
+   212→            sub={stats.next ? `${stats.next.serviceName}` : "Nothing booked"}
+   213→          />
+   214→          <CustomerStat
+   215→            icon={CalendarRange}
+   216→            label="Upcoming"
+   217→            value={String(grouped.upcoming.length)}
+   218→            sub="appointments"
+   219→          />
+   220→          <CustomerStat
+   221→            icon={CheckCircle2}
+   222→            label="Visits"
+   223→            value={String(stats.visits)}
+   224→            sub="completed all-time"
+   225→          />
+   226→          <CustomerStat
+   227→            icon={Wallet}
+   228→            label="Total spend"
+   229→            value={fmtMoney(stats.spend)}
+   230→            sub="completed visits"
+   231→          />
+   232→        </div>
+   233→      ) : null}
+   234→
+   235→      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-6">
+   236→        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
+   237→          <TabsTrigger value="upcoming" className="gap-1.5">
+   238→            Upcoming
+   239→            <CountPill n={grouped.upcoming.length} />
+   240→          </TabsTrigger>
+   241→          <TabsTrigger value="past" className="gap-1.5">
+   242→            Past
+   243→            <CountPill n={grouped.past.length} />
+   244→          </TabsTrigger>
+   245→          <TabsTrigger value="cancelled" className="gap-1.5">
+   246→            Cancelled
+   247→            <CountPill n={grouped.cancelled.length} />
+   248→          </TabsTrigger>
+   249→          <TabsTrigger value="waitlist" className="gap-1.5">
+   250→            Waitlist
+   251→            <CountPill n={wlItems.filter((w) => !w.notifiedAt).length} />
+   252→          </TabsTrigger>
+   253→        </TabsList>
+   254→      </Tabs>
+   255→
+   256→      {error ? (
+   257→        <EmptyState icon={CalendarX2} title="Could not load bookings" description={error} />
+   258→      ) : tab === "waitlist" ? (
+   259→        wlLoading && wlItems.length === 0 ? (
+   260→          <div className="flex flex-col gap-3">
+   261→            {Array.from({ length: 3 }).map((_, i) => (
+   262→              <Skeleton key={i} className="h-24 rounded-xl" />
+   263→            ))}
+   264→          </div>
+   265→        ) : wlItems.length === 0 ? (
+   266→          <EmptyState
+   267→            icon={BellRing}
+   268→            title={emptyCopy.waitlist.title}
+   269→            description={emptyCopy.waitlist.description}
+   270→          />
+   271→        ) : (
+   272→          <div className="flex flex-col gap-3">
+   273→            {wlItems.map((w) => (
+   274→              <WaitlistCard key={w.id} entry={w} onChanged={wlReload} />
+   275→            ))}
+   276→          </div>
+   277→        )
+   278→      ) : loading ? (
+   279→        <div className="flex flex-col gap-3">
+   280→          {Array.from({ length: 4 }).map((_, i) => (
+   281→            <Skeleton key={i} className="h-28 rounded-xl" />
+   282→          ))}
+   283→        </div>
+   284→      ) : lists[tab].length === 0 ? (
+   285→        <EmptyState
+   286→          icon={tab === "upcoming" ? CalendarRange : tab === "past" ? CheckCircle2 : XCircle}
+   287→          title={emptyCopy[tab].title}
+   288→          description={emptyCopy[tab].description}
+   289→        />
+   290→      ) : (
+   291→        <div className="flex flex-col gap-3">
+   292→          {lists[tab].map((b) => (
+   293→            <BookingCard
+   294→              key={b.id}
+   295→              booking={b}
+   296→              busy={busyId === b.id}
+   297→              onReschedule={() => openReschedule(b.id)}
+   298→              onCancel={() => setCancelTarget(b)}
+   299→              onReview={() => {
+   300→                setReviewEditMode(false);
+   301→                setReviewTarget(b);
+   302→              }}
+   303→              onEditReview={() => {
+   304→                setReviewEditMode(true);
+   305→                setReviewTarget(b);
+   306→              }}
+   307→              onDeleteReview={() => setDeleteReviewTarget(b)}
+   308→              onNotesSaved={reload}
+   309→            />
+   310→          ))}
+   311→        </div>
+   312→      )}
+   313→
+   314→      <ReviewDialog
+   315→        booking={reviewTarget}
+   316→        mode={reviewEditMode ? "edit" : "create"}
+   317→        onClose={() => setReviewTarget(null)}
+   318→        onReviewed={reload}
+   319→      />
+   320→
+   321→      <AlertDialog
+   322→        open={deleteReviewTarget !== null}
+   323→        onOpenChange={(o) => !o && setDeleteReviewTarget(null)}
+   324→      >
+   325→        <AlertDialogContent>
+   326→          <AlertDialogHeader>
+   327→            <AlertDialogTitle>Delete this review?</AlertDialogTitle>
+   328→            <AlertDialogDescription>
+   329→              Your rating and comment for {deleteReviewTarget?.serviceName} with{" "}
+   330→              {deleteReviewTarget?.providerName} will be removed. You can leave
+   331→              a new review afterwards.
+   332→            </AlertDialogDescription>
+   333→          </AlertDialogHeader>
+   334→          <AlertDialogFooter>
+   335→            <AlertDialogCancel>Keep review</AlertDialogCancel>
+   336→            <AlertDialogAction
+   337→              variant="destructive"
+   338→              onClick={deleteReview}
+   339→              disabled={busyId !== null}
+   340→            >
+   341→              Delete review
+   342→            </AlertDialogAction>
+   343→          </AlertDialogFooter>
+   344→        </AlertDialogContent>
+   345→      </AlertDialog>
+   346→
+   347→      <AlertDialog open={cancelTarget !== null} onOpenChange={(o) => !o && setCancelTarget(null)}>
+   348→        <AlertDialogContent>
+   349→          <AlertDialogHeader>
+   350→            <AlertDialogTitle>Cancel this booking?</AlertDialogTitle>
+   351→            <AlertDialogDescription>
+   352→              {cancelTarget?.serviceName} with {cancelTarget?.providerName} on{" "}
+   353→              {cancelTarget ? fmtDateUTC(cancelTarget.startAt) : ""} at{" "}
+   354→              {cancelTarget ? fmtTimeUTC(cancelTarget.startAt) : ""}. The slot is
+   355→              released immediately for others to book.
+   356→            </AlertDialogDescription>
+   357→          </AlertDialogHeader>
+   358→          <AlertDialogFooter>
+   359→            <AlertDialogCancel>Keep booking</AlertDialogCancel>
+   360→            <AlertDialogAction
+   361→              variant="destructive"
+   362→              onClick={() => cancelTarget && cancelBooking(cancelTarget)}
+   363→            >
+   364→              Yes, cancel it
+   365→            </AlertDialogAction>
+   366→          </AlertDialogFooter>
+   367→        </AlertDialogContent>
+   368→      </AlertDialog>
+   369→    </div>
+   370→  );
+   371→}
+   372→
+   373→function CountPill({ n }: { n: number }) {
+   374→  if (n === 0) return null;
+   375→  return (
+   376→    <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold text-secondary-foreground">
+   377→      {n}
+   378→    </span>
+   379→  );
+   380→}
+   381→
+   382→/** One watched slot: "alert me the moment this frees up". */
+   383→function WaitlistCard({
+   384→  entry,
+   385→  onChanged,
+   386→}: {
+   387→  entry: WaitlistDTO;
+   388→  onChanged: () => void;
+   389→}) {
+   390→  const nav = useUIStore((s) => s.nav);
+   391→  const openBooking = useUIStore((s) => s.openBooking);
+   392→  const [busy, setBusy] = useState(false);
+   393→  const alerted = Boolean(entry.notifiedAt);
+   394→
+   395→  /** Deep-link: open the booking dialog pre-filled for this watched slot. */
+   396→  function deepLink() {
+   397→    const day = entry.startAt.slice(0, 10);
+   398→    if (day < todayKey() || day > addDaysKey(todayKey(), 13)) {
+   399→      toast.info("That date is beyond the 14-day picker — showing the soonest days instead");
+   400→    }
+   401→    nav("browse");
+   402→    openBooking(entry.serviceId, { providerId: entry.providerId, date: day });
+   403→  }
+   404→
+   405→  async function remove() {
+   406→    setBusy(true);
+   407→    try {
+   408→      await apiFetch(`/api/waitlist/${entry.id}`, { method: "DELETE" });
+   409→      toast.info("Stopped watching that slot.");
+   410→      onChanged();
+   411→    } catch {
+   412→      toast.error("Could not remove the watch.");
+   413→    } finally {
+   414→      setBusy(false);
+   415→    }
+   416→  }
+   417→
+   418→  return (
+   419→    <Card
+   420→      className={cn(
+   421→        "card-lift py-0 hover:border-primary/40",
+   422→        alerted && "border-violet-500/30",
+   423→        busy && "opacity-50",
+   424→      )}
+   425→    >
+   426→      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+   427→        <div className="flex min-w-0 flex-1 items-start gap-4">
+   428→          <div
+   429→            className={cn(
+   430→              "flex size-12 shrink-0 items-center justify-center rounded-lg",
+   431→              alerted
+   432→                ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
+   433→                : "bg-secondary text-secondary-foreground",
+   434→            )}
+   435→          >
+   436→            {alerted ? (
+   437→              <Sparkles className="size-5" />
+   438→            ) : (
+   439→              <Bell className="size-5 animate-pulse" />
+   440→            )}
+   441→          </div>
+   442→          <div className="min-w-0 flex-1">
+   443→            <div className="flex flex-wrap items-center gap-2">
+   444→              <p className="font-semibold leading-tight">{entry.serviceName}</p>
+   445→              {alerted ? (
+   446→                <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
+   447→                  <Sparkles className="size-3" /> Slot opened — go book it
+   448→                </span>
+   449→              ) : (
+   450→                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+   451→                  <span className="relative flex size-1.5">
+   452→                    <span className="absolute inline-flex size-1.5 animate-ping rounded-full bg-amber-500 opacity-75" />
+   453→                    <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+   454→                  </span>
+   455→                  Watching
+   456→                </span>
+   457→              )}
+   458→            </div>
+   459→            <p className="mt-0.5 text-sm text-muted-foreground">
+   460→              with {entry.providerName} · {fmtDateUTC(entry.startAt)} at{" "}
+   461→              {fmtTimeUTC(entry.startAt)} · {fmtDuration(entry.durationMin)}
+   462→            </p>
+   463→            <p className="mt-1 text-xs text-muted-foreground/80">
+   464→              {alerted
+   465→                ? "We pinged you when this slot freed up — it may be gone again, so check the calendar."
+   466→                : "We'll notify you the moment this slot frees up."}
+   467→            </p>
+   468→          </div>
+   469→        </div>
+   470→
+   471→        <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+   472→          <span className="text-base font-bold tabular-nums">{fmtMoney(entry.price)}</span>
+   473→          <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:items-center">
+   474→            {alerted ? (
+   475→              <Button
+   476→                size="sm"
+   477→                onClick={deepLink}
+   478→                className="bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-600 dark:hover:bg-violet-500"
+   479→              >
+   480→                <CalendarCheck className="size-3.5" /> Book this slot
+   481→              </Button>
+   482→            ) : (
+   483→              <Button size="sm" variant="outline" onClick={deepLink}>
+   484→                <CalendarRange className="size-3.5" /> View calendar
+   485→              </Button>
+   486→            )}
+   487→            <Button
+   488→              size="sm"
+   489→              variant="ghost"
+   490→              onClick={remove}
+   491→              disabled={busy}
+   492→              className="hover:text-destructive"
+   493→            >
+   494→              <Trash2 className="size-3.5" /> Remove
+   495→            </Button>
+   496→          </div>
+   497→        </div>
+   498→      </CardContent>
+   499→    </Card>
+   500→  );
+   501→}
+   502→
+   503→/** Inline editor for the customer's booking note (pending/confirmed only). */
+   504→function NotesEditor({
+   505→  booking,
+   506→  onSaved,
+   507→}: {
+   508→  booking: BookingDTO;
+   509→  onSaved: () => void;
+   510→}) {
+   511→  const [open, setOpen] = useState(false);
+   512→  const [value, setValue] = useState(booking.notes ?? "");
+   513→  const [saving, setSaving] = useState(false);
+   514→
+   515→  async function save() {
+   516→    setSaving(true);
+   517→    try {
+   518→      await apiFetch(`/api/bookings/${booking.id}`, {
+   519→        method: "PATCH",
+   520→        body: { notes: value.trim() ? value.trim() : null },
+   521→      });
+   522→      toast.success("Note updated.");
+   523→      setOpen(false);
+   524→      onSaved();
+   525→    } catch (err) {
+   526→      toast.error(err instanceof Error ? err.message : "Could not save note.");
+   527→    } finally {
+   528→      setSaving(false);
+   529→    }
+   530→  }
+   531→
+   532→  return (
+   533→    <Popover
+   534→      open={open}
+   535→      onOpenChange={(o) => {
+   536→        setOpen(o);
+   537→        if (o) setValue(booking.notes ?? "");
+   538→      }}
+   539→    >
+   540→      <PopoverTrigger asChild>
+   541→        <Button
+   542→          size="sm"
+   543→          variant="outline"
+   544→          className={cn(booking.notes && "border-primary/40")}
+   545→          aria-label="Edit booking note"
+   546→        >
+   547→          <PencilLine className="size-3.5" />
+   548→          {booking.notes ? "Note" : "Add note"}
+   549→        </Button>
+   550→      </PopoverTrigger>
+   551→      <PopoverContent className="w-80" align="end">
+   552→        <div className="flex flex-col gap-3">
+   553→          <div>
+   554→            <p className="text-sm font-semibold">Booking note</p>
+   555→            <p className="text-xs text-muted-foreground">
+   556→              Visible to {booking.providerName} when they open the diary.
+   557→            </p>
+   558→          </div>
+   559→          <Textarea
+   560→            value={value}
+   561→            onChange={(e) => setValue(e.target.value)}
+   562→            maxLength={300}
+   563→            rows={3}
+   564→            placeholder="e.g. Running 5 minutes late, sorry!"
+   565→            aria-label="Booking note"
+   566→          />
+   567→          <div className="flex items-center justify-between gap-2">
+   568→            <span className="text-[11px] tabular-nums text-muted-foreground">
+   569→              {value.length}/300
+   570→            </span>
+   571→            <div className="flex gap-1.5">
+   572→              <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+   573→                Discard
+   574→              </Button>
+   575→              <Button size="sm" onClick={save} disabled={saving}>
+   576→                {saving ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+   577→                Save note
+   578→              </Button>
+   579→            </div>
+   580→          </div>
+   581→        </div>
+   582→      </PopoverContent>
+   583→    </Popover>
+   584→  );
+   585→}
+   586→
+   587→/** Reviews stay editable for this many minutes after posting (mirrors the API). */
+   588→const REVIEW_EDIT_WINDOW_MIN = 15;
+   589→
+   590→function BookingCard({
+   591→  booking,
+   592→  busy,
+   593→  onReschedule,
+   594→  onCancel,
+   595→  onReview,
+   596→  onEditReview,
+   597→  onDeleteReview,
+   598→  onNotesSaved,
+   599→}: {
+   600→  booking: BookingDTO;
+   601→  busy: boolean;
+   602→  onReschedule: () => void;
+   603→  onCancel: () => void;
+   604→  onReview: () => void;
+   605→  onEditReview: () => void;
+   606→  onDeleteReview: () => void;
+   607→  onNotesSaved: () => void;
+   608→}) {
+   609→  const active = booking.status === "PENDING" || booking.status === "CONFIRMED";
+   610→  const canReview = booking.status === "COMPLETED" && !booking.review;
+   611→  const reviewMinsLeft = booking.review
+   612→    ? Math.max(
+   613→        0,
+   614→        REVIEW_EDIT_WINDOW_MIN -
+   615→          Math.floor((Date.now() - new Date(booking.review.createdAt).getTime()) / 60_000),
+   616→      )
+   617→    : 0;
+   618→  const reviewEditable = Boolean(booking.review) && reviewMinsLeft > 0;
+   619→
+   620→  return (
+   621→    <Card
+   622→      className={cn(
+   623→        "card-lift py-0 hover:border-primary/40",
+   624→        busy && "opacity-50",
+   625→      )}
+   626→    >
+   627→      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+   628→        <div className="flex min-w-0 flex-1 items-start gap-4">
+   629→          <div className="flex w-16 shrink-0 flex-col items-center rounded-lg border bg-muted/50 py-2">
+   630→            <span className="text-[10px] font-medium uppercase text-muted-foreground">
+   631→              {new Date(booking.startAt).toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}
+   632→            </span>
+   633→            <span className="text-xl font-bold leading-none tabular-nums">
+   634→              {new Date(booking.startAt).getUTCDate()}
+   635→            </span>
+   636→            <span className="text-[10px] text-muted-foreground">
+   637→              {new Date(booking.startAt).getUTCDay() === new Date().getUTCDay() ? "today" : ""}
+   638→            </span>
+   639→          </div>
+   640→
+   641→          <div className="min-w-0 flex-1">
+   642→            <div className="flex flex-wrap items-center gap-2">
+   643→              <p className="font-semibold leading-tight">{booking.serviceName}</p>
+   644→              <StatusBadge status={booking.status} />
+   645→            </div>
+   646→            <p className="mt-0.5 text-sm text-muted-foreground">
+   647→              with {booking.providerName} · {fmtTimeUTC(booking.startAt)}–{fmtTimeUTC(booking.endAt)} ·{" "}
+   648→              {fmtDuration(booking.durationMin)}
+   649→            </p>
+   650→            {booking.notes && (
+   651→              <p className="mt-1 line-clamp-1 text-xs italic text-muted-foreground">
+   652→                “{booking.notes}”
+   653→              </p>
+   654→            )}
+   655→            {booking.review && (
+   656→              <div className="mt-2 flex flex-wrap items-center gap-2">
+   657→                <StarRating value={booking.review.rating} />
+   658→                {booking.review.comment && (
+   659→                  <span className="line-clamp-1 text-xs text-muted-foreground">
+   660→                    “{booking.review.comment}”
+   661→                  </span>
+   662→                )}
+   663→                {reviewEditable && (
+   664→                  <span className="inline-flex items-center gap-1">
+   665→                    <Button
+   666→                      size="sm"
+   667→                      variant="ghost"
+   668→                      className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+   669→                      onClick={onEditReview}
+   670→                      disabled={busy}
+   671→                      title="Edit your review"
+   672→                    >
+   673→                      <PencilLine className="size-3" /> Edit
+   674→                      <span className="text-[10px] text-muted-foreground/70">{reviewMinsLeft}m</span>
+   675→                    </Button>
+   676→                    <Button
+   677→                      size="sm"
+   678→                      variant="ghost"
+   679→                      className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+   680→                      onClick={onDeleteReview}
+   681→                      disabled={busy}
+   682→                      title="Delete your review"
+   683→                    >
+   684→                      <Trash2 className="size-3" /> Delete
+   685→                    </Button>
+   686→                  </span>
+   687→                )}
+   688→              </div>
+   689→            )}
+   690→          </div>
+   691→        </div>
+   692→
+   693→        <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+   694→          <span className="text-base font-bold tabular-nums">{fmtMoney(booking.price)}</span>
+   695→          <div className="flex flex-wrap gap-1.5">
+   696→            {active && (
+   697→              <>
+   698→                <NotesEditor booking={booking} onSaved={onNotesSaved} />
+   699→                <Button
+   700→                  size="sm"
+   701→                  variant="outline"
+   702→                  disabled={busy}
+   703→                  title="Download calendar invite"
+   704→                  onClick={() =>
+   705→                    downloadIcs(booking.id).catch((err) =>
+   706→                      toast.error(
+   707→                        err instanceof Error ? err.message : "Download failed.",
+   708→                      ),
+   709→                    )
+   710→                  }
+   711→                >
+   712→                  <CalendarPlus className="size-3.5" /> Calendar
+   713→                </Button>
+   714→                <Button size="sm" variant="outline" onClick={onReschedule} disabled={busy}>
+   715→                  <RotateCcw className="size-3.5" /> Reschedule
+   716→                </Button>
+   717→                <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
+   718→                  <XCircle className="size-3.5" /> Cancel
+   719→                </Button>
+   720→              </>
+   721→            )}
+   722→            {canReview && (
+   723→              <Button size="sm" onClick={onReview} disabled={busy}>
+   724→                <MessageSquareHeart className="size-3.5" /> Leave a review
+   725→              </Button>
+   726→            )}
+   727→          </div>
+   728→        </div>
+   729→      </CardContent>
+   730→    </Card>
+   731→  );
+   732→}
+   733→
+   734→function CustomerStat({
+   735→  icon: Icon,
+   736→  label,
+   737→  value,
+   738→  sub,
+   739→}: {
+   740→  icon: typeof Clock;
+   741→  label: string;
+   742→  value: string;
+   743→  sub?: string;
+   744→}) {
+   745→  return (
+   746→    <Card className="py-0 transition-shadow duration-200 hover:shadow-md">
+   747→      <CardContent className="flex items-center gap-3 p-4">
+   748→        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+   749→          <Icon className="size-4.5" />
+   750→        </span>
+   751→        <div className="min-w-0">
+   752→          <p className="text-xs text-muted-foreground">{label}</p>
+   753→          <p className="truncate text-lg font-bold leading-tight tabular-nums">{value}</p>
+   754→          {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
+   755→        </div>
+   756→      </CardContent>
+   757→    </Card>
+   758→  );
+   759→}
+   760→

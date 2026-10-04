@@ -58,6 +58,12 @@ Ravensbourne unit **CMS22204 — Full Stack Application Development** (Level 5, 
 | **Provider insights** | The provider portal's **Insights tab**: revenue / bookings / rating / **utilisation (booked vs open hours)** / repeat-client share / upcoming KPIs, an **8-week performance chart** (booking bars + cumulative revenue area), top-services revenue mix and outcome donut — the same visual language as the admin dashboard |
 | **Admin closures overview** | The Staff tab lists **every provider's upcoming time off** in one card — window reason, "N bookings to move" clash badges — and admins can lift a closure with one click (slots reopen instantly, open booking grids refresh live) |
 | **Admin closure creation** | The Staff tab's "Add closure" dialog blocks **any provider's** calendar — full-day, a date range or part of one day (15-min steps) — with affected-customer notifications surfaced on submit; provider selection sticks for repeat blocks |
+| **Customer time zones** | Every date and time a customer sees — search results, slot grids, their appointments, the bell — renders in their **chosen display time zone** (searchable picker in the user menu, browser-zone shortcut, DST-safe day windows). Availability math and double-booking checks stay exact business-UTC behind the scenes; staff calendars stay UTC by design |
+| **Smart recommendations** | The Browse page opens with a **"Recommended for you"** strip: signed-in customers with favourites get same-category services they haven't hearted yet, ranked by rating × review volume with a **"♥ Because you liked X"** reason on each card; everyone else sees the top-rated "popular right now" shortlist |
+| **Admin broadcast** | One composer, every bell: the owner sends a message to **all accounts, customers only, or just customers with upcoming bookings** — each recipient gets their own outbox row + live realtime push |
+| **Review replies** | Providers (or the owner) **reply publicly to customer reviews** from a dedicated Reviews tab (KPI strip: avg rating, reply rate; inline composer with edit/delete); customers see the response nested under the review in the provider profile dialog, the landing testimonials and their own review history |
+| **Next-appointment card** | Signed-in customers land on a personalized **"Your next appointment"** card — service, provider, local date/time, live countdown (pulses when it starts within the hour) and a jump into My bookings |
+| **Dashboard range switcher** | The admin analytics window switches between **7 / 30 / 90 days** with one segmented control — KPI deltas, every chart and the CSV export follow the selected range |
 
 ---
 
@@ -188,7 +194,8 @@ self-service role escalation is impossible.
 ## Data models
 
 ```
-User        id, name, email (unique), passwordHash, role[ADMIN|PROVIDER|CUSTOMER], timestamps
+User        id, name, email (unique), passwordHash, role[ADMIN|PROVIDER|CUSTOMER],
+            timezone (IANA, default UTC — customer display zone), timestamps
 Provider    id, userId → User (1:1), bio, specialty, isActive
 Service     id, name, category, description, durationMin, price, isActive, timestamps
 ProviderService  (providerId, serviceId) composite PK — M:N link
@@ -200,9 +207,11 @@ Booking     id, customerId → User, providerId → Provider, serviceId → Serv
             startAt, endAt, status[PENDING|CONFIRMED|COMPLETED|CANCELLED|NO_SHOW],
             notes, timestamps
             index (providerId, startAt) — the double-booking scan path
-Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment
+Review      id, bookingId → Booking (1:1, unique), authorId → User, rating (1–5), comment,
+            reply?, repliedAt?, repliedById → User? — public business reply on the review
 Notification id, userId → User, type[booking_created|booking_status|booking_cancelled|
-            booking_rescheduled|time_off_conflict|waitlist_opened], title, body, bookingId → Booking?,
+            booking_rescheduled|time_off_conflict|waitlist_opened|broadcast], title, body,
+            bookingId → Booking?,
             meta? (JSON — powers inline actions such as the waitlist deep-link),
             readAt? — mock email outbox (index: userId, createdAt)
 Waitlist    id, userId → User, providerId → Provider, serviceId → Service, startAt, endAt,
@@ -233,6 +242,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | POST | `/auth/refresh` | public | `{ refreshToken }` → rotated token pair |
 | POST | `/auth/logout` | public | stateless — client discards tokens |
 | GET | `/auth/me` | any | → current user profile |
+| PATCH | `/auth/me` | customer | `{ timezone }` (IANA name) — sets the display time zone; unrecognised zones are ignored with a note |
 
 ### Services
 
@@ -242,6 +252,7 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | POST | `/services` | admin | `{ name, category, description?, durationMin, price, isActive?, providerIds? }` |
 | PUT | `/services/:id` | admin | partial update + provider re-link |
 | DELETE | `/services/:id` | admin | soft-deletes (deactivates) when booking history exists |
+| GET | `/services/recommended` | public | `limit` (2–8) → personalised shortlist: favourites-affinity ranking ("because you liked X") for customers with hearts, top-rated fallback otherwise; response carries `basis` + per-item `reasons` |
 
 ### Providers & slots
 
@@ -251,10 +262,11 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | POST | `/providers` | admin | provisions a PROVIDER user (name, email, password, bio, specialty, serviceIds) |
 | GET | `/providers/:id` | public | full profile: services, rating, weekly availability + 10 recent reviews (email admin-only) |
 | PATCH | `/providers/:id` | admin | bio / specialty / isActive / service links |
-| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId` → slot grid with `available` flags + `blockedBy` reason (`booking\|lead\|timeoff`) + overlapping `timeOff` windows |
+| GET | `/providers/:id/slots` | public | `date=YYYY-MM-DD&serviceId&tz=IANA` → slot grid with `available` flags + `blockedBy` reason (`booking\|lead\|timeoff`) + overlapping `timeOff` windows. `date` is interpreted in `tz` (default UTC) — a customer's local calendar day — while the availability math stays business-UTC |
 | GET | `/providers/me/availability` | provider/admin | weekly windows |
 | PUT | `/providers/me/availability` | provider/admin | full replace; rejects overlapping windows |
 | GET | `/providers/me/analytics` | provider | Insights tab: KPIs (revenue 30d, bookings 30d, rating, **utilisation %**, repeat-client %, upcoming) + 8-week `weekly` series + `serviceMix` + `statusMix` |
+| GET | `/providers/me/reviews` | provider | `limit` (5–50) → reviews on the provider's own bookings, newest first, each with author/service/rating/comment + business reply state — powers the Reviews tab |
 | GET | `/providers/me/time-off` | provider/admin | upcoming + recent windows, each with a live count of affected bookings |
 | POST | `/providers/me/time-off` | provider/admin | `{ date, endDate?, startTime?, endTime?, reason? }` — full-day or partial block; affected customers get a schedule-change notification; `201` returns the window + `notified` count. Admins may pass `?providerId=` to block **any** provider's calendar (same contract) |
 | DELETE | `/providers/me/time-off/:id` | provider/admin | removes the block (slot grids refresh live); admins may pass `?providerId=` to lift any staff member's closure |
@@ -302,11 +314,14 @@ Errors return `{ "error": string, "code": string }`. Base URL: `/api`.
 | GET | `/dashboard/summary` | admin | `range=7\|30\|90` → KPIs (incl. previous-period deltas) + all chart series incl. `revenueTrend` (cumulative this-period vs previous) |
 | GET | `/dashboard/export` | admin | `range` → CSV download |
 | GET | `/admin/time-off` | admin | every provider's upcoming closures with clash counts (Staff tab overview) |
+| POST | `/admin/broadcast` | admin | `{ title, body, audience: ALL\|CUSTOMERS\|UPCOMING }` → one outbox row + realtime push per recipient (`{ sent }`) |
 | GET | `/categories` | public | distinct categories + counts |
-| GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials) |
+| GET | `/reviews/recent` | public | `limit` → latest written reviews (testimonials), each carrying the business reply when present |
 | GET | `/activity` | public | `limit` → privacy-safe recent-booking feed + 24h count (landing ticker) |
 | PUT | `/reviews/:id` | author | edit own review within **15 min** of posting; `{ rating, comment? }` |
 | DELETE | `/reviews/:id` | author | delete own review within 15 min (booking becomes reviewable again) |
+| POST | `/reviews/:id/reply` | provider (own bookings) / admin | `{ reply }` (3–500 chars) — post or **replace** the public business reply (`201` first time, `200` when replacing) |
+| DELETE | `/reviews/:id/reply` | reply author / admin | removes the reply |
 | GET | `/health` | public | liveness probe |
 | GET | `/api` | public | machine-readable endpoint index |
 
@@ -367,9 +382,11 @@ to the service.
 - **Single-page app on `/`** with client-side view switching — the sandbox exposes one route;
   a hash/router-based split adds no value here and the store-driven navigation keeps deep
   intents (e.g. "sign in to book") resumable.
-- **Business timezone = UTC** (all times rendered as UTC wall-clock). A production build would
-  store per-business timezones with `timestamptz`; the simplification removes DST ambiguity in
-  the demo without affecting the booking logic.
+- **Business timezone = UTC, customer display time zones** (IANA, stored per user). All
+  availability math, booking windows and double-booking checks run in UTC — one unambiguous
+  basis; each customer's UI renders dates/times in their chosen zone via DST-safe day-window
+  math (`lib/tz.ts`), and the slot endpoint interprets the requested `date` in the customer's
+  zone while the underlying instants stay exact. Staff calendars intentionally stay business-UTC.
 - **Search filtering** partly in SQL (category, price, text) and partly in JS (provider-name
   match, next-available sort) — at demo scale (≤ hundreds of rows) this keeps one query shape
   for all filters; at production scale the provider-name search would move to a join/FTS.

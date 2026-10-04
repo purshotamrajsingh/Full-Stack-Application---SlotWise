@@ -25,6 +25,7 @@ model User {
   provider Provider?
   bookings Booking[] @relation("CustomerBookings")
   reviews  Review[]
+  reviewReplies Review[] @relation("ReviewReplies")
   notifications Notification[]
   waitlist Waitlist[]
   favorites Favorite[]
@@ -164,6 +165,13 @@ model Review {
 
   rating  Int
   comment String?
+
+  // Public reply from the business side (the provider who delivered the
+  // service, or the owner). Null until someone replies.
+  reply       String?
+  repliedAt   DateTime?
+  repliedById String?
+  repliedBy   User?     @relation("ReviewReplies", fields: [repliedById], references: [id])
 
   createdAt DateTime @default(now())
 }

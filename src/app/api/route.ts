@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 export async function GET() {
   return NextResponse.json({
     name: "SlotWise API",
-    version: "1.3.0",
+    version: "1.4.0",
     auth: "Bearer JWT (Authorization header) — access + refresh token pair",
     endpoints: {
       auth: [
@@ -28,6 +28,7 @@ export async function GET() {
         "GET  /api/providers/:id/slots?date=&serviceId=",
         "GET/PUT /api/providers/me/availability",
         "GET  /api/providers/me/analytics (provider)",
+        "GET  /api/providers/me/reviews (provider)",
         "GET/POST /api/providers/me/time-off",
         "DELETE /api/providers/me/time-off/:id",
       ],
@@ -60,9 +61,13 @@ export async function GET() {
         "GET /api/dashboard/export?range= (admin, CSV)",
         "GET /api/admin/time-off (admin — closures overview)",
       ],
+      reviews: [
+        "GET  /api/reviews/recent?limit=",
+        "POST /api/reviews/:id/reply (provider/admin — post or replace)",
+        "DELETE /api/reviews/:id/reply (reply author/admin)",
+      ],
       misc: [
         "GET /api/categories",
-        "GET /api/reviews/recent?limit=",
         "GET /api/activity?limit=",
         "GET /api/health",
       ],

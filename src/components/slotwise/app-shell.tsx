@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import {
   CalendarCheck,
   ChevronDown,
+  Globe,
   LayoutDashboard,
   LogOut,
   Scissors,
@@ -30,9 +32,10 @@ import {
 } from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/slotwise/theme-toggle";
 import { NotificationBell } from "@/components/slotwise/notification-bell";
+import { TimezoneDialog } from "@/components/slotwise/timezone-dialog";
 import { useAuthStore } from "@/store/auth-store";
 import { useUIStore, type View } from "@/store/ui-store";
-import { initials } from "@/lib/format";
+import { initials, tzSuffix } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const ROLE_BADGE: Record<string, string> = {
@@ -52,6 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const logout = useAuthStore((s) => s.logout);
   const view = useUIStore((s) => s.view);
   const nav = useUIStore((s) => s.nav);
+  const [tzOpen, setTzOpen] = useState(false);
 
   const navItems: NavItem[] = [{ view: "browse", label: "Browse", icon: Search }];
   if (user?.role === "CUSTOMER") {
@@ -131,9 +135,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {user.role === "CUSTOMER" && (
-                    <DropdownMenuItem onClick={() => nav("bookings")}>
-                      <CalendarRange className="size-4" /> My bookings
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem onClick={() => nav("bookings")}>
+                        <CalendarRange className="size-4" /> My bookings
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setTzOpen(true)}>
+                        <Globe className="size-4" />
+                        <span className="flex flex-1 items-center justify-between gap-3">
+                          Time zone
+                          <span className="text-xs tabular-nums text-muted-foreground">
+                            {tzSuffix()}
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    </>
                   )}
                   {user.role === "ADMIN" && (
                     <DropdownMenuItem onClick={() => nav("admin")}>
@@ -216,6 +231,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1">{children}</main>
 
+      {/* Mounted only while open — the dialog's local `selected` state then
+          initialises from the CURRENT profile on every open (the shell mounts
+          long before the session hydrates, so a permanently-mounted copy
+          would stick at "UTC"). */}
+      {tzOpen && (
+        <TimezoneDialog open={tzOpen} onOpenChange={setTzOpen} />
+      )}
+
       <footer className="mt-auto border-t bg-muted/30">
         <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6">
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
@@ -253,7 +276,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="mt-8 flex flex-col items-start justify-between gap-2 border-t pt-6 text-xs text-muted-foreground sm:flex-row">
             <p>© 2026 SlotWise · Built for CMS22204 Full Stack Application Development</p>
-            <p>All times shown in business timezone (UTC)</p>
+            <p>
+              {user?.role === "CUSTOMER" && tzSuffix() !== "UTC"
+                ? `All times shown in your time zone (${tzSuffix()})`
+                : "All times shown in business timezone (UTC)"}
+            </p>
           </div>
         </div>
       </footer>

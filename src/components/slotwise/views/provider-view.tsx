@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   Loader2,
+  MessageSquareQuote,
   Plus,
   Radio,
   Save,
@@ -32,6 +33,7 @@ import { StatusBadge } from "@/components/slotwise/status-badge";
 import { EmptyState } from "@/components/slotwise/empty-state";
 import { TimeOffManager } from "@/components/slotwise/time-off-manager";
 import { InsightsPanel } from "@/components/slotwise/insights-panel";
+import { ProviderReviewsTab } from "@/components/slotwise/provider-reviews-tab";
 import { useAuthStore } from "@/store/auth-store";
 import { useApiQuery } from "@/hooks/use-api-query";
 import { useRealtime } from "@/hooks/use-realtime";
@@ -166,11 +168,17 @@ export function ProviderView() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
+        {/* h-auto: the list wraps to 3 rows on mobile — the fixed h-9 base
+            lets rows 2-3 collide with the tab content below. */}
+        <TabsList className="h-auto grid w-full grid-cols-2 sm:grid-cols-5">
           <TabsTrigger value="today">Diary ({dayBookings.length})</TabsTrigger>
           <TabsTrigger value="all">All bookings</TabsTrigger>
           <TabsTrigger value="availability">Availability</TabsTrigger>
           <TabsTrigger value="insights">Insights</TabsTrigger>
+          <TabsTrigger value="reviews">
+            <MessageSquareQuote className="size-3.5" />
+            Reviews
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="today" className="mt-4">
@@ -211,6 +219,10 @@ export function ProviderView() {
 
         <TabsContent value="insights" className="mt-4">
           <InsightsPanel />
+        </TabsContent>
+
+        <TabsContent value="reviews" className="mt-4">
+          <ProviderReviewsTab />
         </TabsContent>
       </Tabs>
     </div>
